@@ -52,6 +52,7 @@ fn run() -> Result<(), String> {
         .and_then(|v| v.as_str())
         .ok_or("pane.read response had no \"read.text\" field")?;
 
+    let config_missing = config::is_missing();
     let config = config::Config::load();
     let matches = matcher::extract_with_config(text, &config);
     if matches.is_empty() {
@@ -60,8 +61,8 @@ fn run() -> Result<(), String> {
     }
 
     let custom_tags: Vec<String> = config.custom.iter().map(|cp| cp.name.clone()).collect();
-    let selection =
-        picker::run(matches, &custom_tags).map_err(|e| format!("picker failed: {e}"))?;
+    let selection = picker::run(matches, &custom_tags, config_missing)
+        .map_err(|e| format!("picker failed: {e}"))?;
     match selection {
         picker::PickerResult::Selected(m, verb) => match actions::dispatch(verb, &m, &pane_id) {
             actions::Outcome::Done(msg) => println!("{msg}"),

@@ -15,8 +15,38 @@
 //! once per invocation, matching the original's snapshot-once model.
 
 use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
+
+/// Starter config written by [`write_default`], mirroring the
+/// original plugin's `Ctrl-W` "write starter config" banner action.
+/// Heavily commented, everything left at its default value so a user
+/// can uncomment/edit just the bits they want.
+pub const DEFAULT_CONFIG_TOML: &str = r#"# herdr-zextract config
+# Full reference: doc/config-reference.md in the plugin repo.
+# This file is read once per popup launch - no live reload.
+
+[patterns]
+# Built-in type tags or custom pattern names to skip entirely.
+# Built-in tags: url, file, diag, git, sha, ipv4, ipv6, uuid, quote, cmd, secret
+# disable = ["ipv6"]
+
+[patterns.secret]
+# Curated formats (JWT, AWS, GitHub, ...) always run. Set false to
+# disable the broader entropy-based fallback pass.
+entropy_filter = true
+
+# Custom regex patterns. Each gets its own #name filter tag in the
+# picker. Uncomment and adjust, or add your own [[patterns.custom]]
+# blocks below.
+#
+# [[patterns.custom]]
+# name = "jira"
+# regex = "([A-Z]+)-([0-9]+)"
+# type = "url"
+# template = "https://jira.example.com/browse/{1}-{2}"
+"#;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct CustomPattern {
@@ -111,4 +141,37 @@ impl Config {
             }
         }
     }
+}
+
+fn config_path() -> Option<PathBuf> {
+    std::env::var("HERDR_PLUGIN_CONFIG_DIR")
+        .ok()
+        .map(|dir| Path::new(&dir).join("config.toml"))
+}
+
+/// True only when `$HERDR_PLUGIN_CONFIG_DIR` is set but `config.toml`
+/// doesn't exist there yet - the case [`write_default`] is for. A set
+/// env var pointing at a config that exists but fails to parse is a
+/// different situation (the user has a config, just a broken one) and
+/// intentionally doesn't trigger this.
+pub fn is_missing() -> bool {
+    config_path().is_some_and(|p| !p.exists())
+}
+
+/// Write [`DEFAULT_CONFIG_TOML`] to `$HERDR_PLUGIN_CONFIG_DIR/config.toml`,
+/// creating the directory if needed. Refuses to overwrite an existing
+/// file (`create_new`) - this is only ever offered when [`is_missing`]
+/// was true, but a defensive double-check costs nothing.
+pub fn write_default() -> Result<PathBuf, String> {
+    let path = config_path().ok_or("HERDR_PLUGIN_CONFIG_DIR is not set")?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("failed to create {parent:?}: {e}"))?;
+    }
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .and_then(|mut f| std::io::Write::write_all(&mut f, DEFAULT_CONFIG_TOML.as_bytes()))
+        .map_err(|e| format!("failed to write {}: {e}", path.display()))?;
+    Ok(path)
 }

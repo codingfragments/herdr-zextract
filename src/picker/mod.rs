@@ -77,10 +77,16 @@ struct State {
     filtered: Vec<ScoredMatch>,
     list_state: ListState,
     last_rows: usize,
+    /// True when `$HERDR_PLUGIN_CONFIG_DIR/config.toml` doesn't exist
+    /// yet - shows the `Ctrl-W` hint and lets it write a starter file.
+    /// Cleared after a successful write so the hint disappears.
+    config_missing: bool,
+    /// Transient status line, cleared on the next keystroke.
+    message: Option<String>,
 }
 
 impl State {
-    fn new(matches: Vec<Match>, custom_tags: Vec<String>) -> Self {
+    fn new(matches: Vec<Match>, custom_tags: Vec<String>, config_missing: bool) -> Self {
         let mut state = Self {
             matches,
             custom_tags,
@@ -90,6 +96,8 @@ impl State {
             filtered: Vec::new(),
             list_state: ListState::default(),
             last_rows: 24,
+            config_missing,
+            message: None,
         };
         state.refilter();
         state
@@ -191,8 +199,13 @@ pub enum PickerResult {
 /// Run the picker over `matches` as a fullscreen terminal UI.
 /// `custom_tags` are the configured names of any custom patterns, so
 /// they resolve as `#name` filter tokens alongside the built-in types.
-pub fn run(matches: Vec<Match>, custom_tags: &[String]) -> io::Result<PickerResult> {
-    let mut state = State::new(matches, custom_tags.to_vec());
+/// `config_missing` shows the `Ctrl-W` "write starter config" hint.
+pub fn run(
+    matches: Vec<Match>,
+    custom_tags: &[String],
+    config_missing: bool,
+) -> io::Result<PickerResult> {
+    let mut state = State::new(matches, custom_tags.to_vec(), config_missing);
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -238,7 +251,21 @@ fn run_loop(
         if key.kind != KeyEventKind::Press {
             continue;
         }
+        state.message = None; // any keystroke clears the previous status line
         if key.modifiers.contains(KeyModifiers::CONTROL) {
+            if key.code == KeyCode::Char('w') {
+                if state.config_missing {
+                    match crate::config::write_default() {
+                        Ok(path) => {
+                            state.config_missing = false;
+                            state.message =
+                                Some(format!("wrote default config to {}", path.display()));
+                        }
+                        Err(e) => state.message = Some(format!("failed to write config: {e}")),
+                    }
+                }
+                continue;
+            }
             let verb = match key.code {
                 KeyCode::Char('y') => Some(Verb::CopyRaw),
                 KeyCode::Char('i') => Some(Verb::Insert),
@@ -343,6 +370,19 @@ fn render_input(frame: &mut Frame, area: Rect, state: &State) {
         format!("{}/{}", state.filtered.len(), state.matches.len()),
         Style::default().fg(MUTED),
     ));
+    if let Some(msg) = &state.message {
+        spans.push(Span::raw("   "));
+        spans.push(Span::styled(
+            msg.clone(),
+            Style::default().fg(HIGHLIGHT).add_modifier(Modifier::BOLD),
+        ));
+    } else if state.config_missing {
+        spans.push(Span::raw("   "));
+        spans.push(Span::styled(
+            "(Ctrl-W: write starter config)",
+            Style::default().fg(MUTED).add_modifier(Modifier::DIM),
+        ));
+    }
     let p = Paragraph::new(Line::from(spans)).block(
         Block::default()
             .borders(Borders::ALL)

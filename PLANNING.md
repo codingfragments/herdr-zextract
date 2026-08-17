@@ -524,6 +524,28 @@ matches while `ipv6` doesn't, and — separately — that both a missing
 config file and a malformed TOML file fall back to built-in defaults
 without crashing.
 
+**Follow-up:** added a `Ctrl-W` "write starter config" affordance,
+matching the original's `Ctrl-W`-on-missing-config banner action. When
+`$HERDR_PLUGIN_CONFIG_DIR/config.toml` doesn't exist, the input bar
+shows a `(Ctrl-W: write starter config)` hint; pressing it writes a
+heavily-commented starter file (`config::DEFAULT_CONFIG_TOML`) and
+shows a status message. Only offered when the file is missing, not
+when it exists-but-fails-to-parse (a broken config is the user's, not
+ours to silently replace), and refuses to overwrite
+(`OpenOptions::create_new`) as a defensive double-check. Verified live:
+the hint appears, `Ctrl-W` writes a valid, immediately-loadable
+`config.toml` and the hint disappears, and pressing it again after
+that is a no-op.
+
+Also clarified for the record: `$HERDR_PLUGIN_CONFIG_DIR` already
+resolves under `~/.config/herdr` (specifically
+`~/.config/herdr/plugins/config/herdr-zextract/`) — it's Herdr's own
+per-plugin namespacing *within* the main herdr config dir, not a
+separate location. Considered and rejected moving to a flat
+`~/.config/herdr/zextract.toml`: that would bypass the official
+mechanism and risk colliding with Herdr's own `config.toml` or other
+plugins'.
+
 ### Phase 6 — Manifest polish & keybinding
 
 **Prompt:** Finalize `herdr-plugin.toml` for both install paths in §8
