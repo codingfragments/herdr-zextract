@@ -8,10 +8,11 @@
 //! this port uses `ratatui`'s standard `CrosstermBackend` instead —
 //! simpler, and gets terminal-resize/cursor handling for free.
 //!
-//! Scope: fuzzy-filter, `#type` include/exclude tokens, navigate, and
-//! select-with-verb (Enter fires the type's default verb; Ctrl+letter
-//! fires a specific one via `actions::Verb`). No multi-select, preview
-//! pane, or config-driven colors yet (Phase 5).
+//! Scope: fuzzy-filter, `#type` include/exclude tokens, navigate,
+//! Input/List modes (`Tab` toggles - Input types into the query, List
+//! fires bare-letter verbs), multi-select (`Space`/`Ctrl-A`/`Ctrl-D`)
+//! with batch dispatch, and a dedicated footer/banner row. No preview
+//! pane or config-driven colors yet (Phase 8/9).
 
 pub mod fuzzy;
 pub mod query;
@@ -65,6 +66,14 @@ fn color_for_tag(tag: &str) -> Color {
         .unwrap_or(Color::Gray)
 }
 
+/// Input mode types into the query; List mode fires bare-letter verbs
+/// instead. `Tab` toggles. Ported from the original's `Mode` enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    Input,
+    List,
+}
+
 struct State {
     matches: Vec<Match>,
     /// Custom pattern names, appended to `TYPE_PRIORITY`'s tags when
@@ -78,11 +87,20 @@ struct State {
     list_state: ListState,
     last_rows: usize,
     /// True when `$HERDR_PLUGIN_CONFIG_DIR/config.toml` doesn't exist
-    /// yet - shows the `Ctrl-W` hint and lets it write a starter file.
-    /// Cleared after a successful write so the hint disappears.
+    /// yet - shows the config-missing banner and lets `Ctrl-W` write a
+    /// starter file. Cleared after a successful write.
     config_missing: bool,
+    /// User dismissed the config-missing banner (`Ctrl-X`) without
+    /// writing a config. `config_missing` stays true (the file still
+    /// doesn't exist) but the banner stops showing.
+    config_missing_dismissed: bool,
     /// Transient status line, cleared on the next keystroke.
     message: Option<String>,
+    mode: Mode,
+    /// Multi-selection: indices into `self.matches`, stable across
+    /// filter changes (a row stays selected even when filtered out,
+    /// and reappears already-selected when the filter brings it back).
+    selected: HashSet<usize>,
 }
 
 impl State {
@@ -97,10 +115,51 @@ impl State {
             list_state: ListState::default(),
             last_rows: 24,
             config_missing,
+            config_missing_dismissed: false,
             message: None,
+            mode: Mode::Input,
+            selected: HashSet::new(),
         };
         state.refilter();
         state
+    }
+
+    /// Toggle the highlighted row's membership in the multi-selection.
+    fn toggle_select_current(&mut self) {
+        let Some(idx) = self.current_match_index() else {
+            return;
+        };
+        if !self.selected.insert(idx) {
+            self.selected.remove(&idx);
+        }
+    }
+
+    /// Select every match currently visible in the filtered list.
+    fn select_all_visible(&mut self) {
+        for s in &self.filtered {
+            self.selected.insert(s.index);
+        }
+    }
+
+    fn deselect_all(&mut self) {
+        self.selected.clear();
+    }
+
+    /// The `Match`es to act on: the multi-selection if non-empty,
+    /// otherwise the highlighted row alone (empty if there's no
+    /// selection cursor either). Ported from the original's
+    /// `effective_targets`, preserving the filtered list's recency
+    /// order in the result.
+    fn effective_targets(&self) -> Vec<&Match> {
+        if !self.selected.is_empty() {
+            return self
+                .filtered
+                .iter()
+                .filter(|s| self.selected.contains(&s.index))
+                .filter_map(|s| self.matches.get(s.index))
+                .collect();
+        }
+        self.current_match().into_iter().collect()
     }
 
     /// Re-run `#type` filtering + fuzzy scoring over `self.matches`,
@@ -181,6 +240,12 @@ impl State {
         self.matches.get(scored.index)
     }
 
+    /// Index into `self.matches` for the currently-highlighted row.
+    fn current_match_index(&self) -> Option<usize> {
+        let i = self.list_state.selected()?;
+        Some(self.filtered.get(i)?.index)
+    }
+
     /// Visible list rows, for PageUp/PageDown step size. Falls back to
     /// a sane default before the first render reports the real size.
     fn list_page_size(&self) -> usize {
@@ -188,11 +253,13 @@ impl State {
     }
 }
 
-/// What the user did with the picker: picked a match with a specific
-/// verb (Enter fires the type's default; Ctrl+<letter> fires a
-/// specific one, when allowed for that match's type), or cancelled.
+/// What the user did with the picker: fired a verb over one or more
+/// matches (Enter fires the type's default; a List-mode bare letter or
+/// a Ctrl+letter universal shortcut fires a specific one, over the
+/// multi-selection if non-empty or the highlighted row otherwise), or
+/// cancelled.
 pub enum PickerResult {
-    Selected(Match, Verb),
+    Selected(Vec<Match>, Verb),
     Cancelled,
 }
 
@@ -227,14 +294,27 @@ pub fn run(
     result
 }
 
-/// If `verb` is allowed for the currently-highlighted match, returns
-/// the Selected result for it; otherwise `None` (key ignored).
-fn select_with_verb(state: &State, verb: Verb) -> Option<PickerResult> {
-    let m = state.current_match()?;
-    if !actions::is_verb_allowed(m, verb) {
+/// If firing `verb` over the current effective targets (the
+/// multi-selection if non-empty, else the highlighted row) is
+/// allowed, returns the `Selected` result to close the picker with.
+/// Otherwise sets `state.message` to the rejection reason (original's
+/// "loud-reject if zero allowed" / per-verb-cap rules) and returns
+/// `None` so the caller keeps the picker open.
+fn try_fire(state: &mut State, verb: Verb) -> Option<PickerResult> {
+    let targets = state.effective_targets();
+    if targets.is_empty() {
         return None;
     }
-    Some(PickerResult::Selected(m.clone(), verb))
+    match actions::plan_batch(verb, &targets) {
+        Ok(()) => Some(PickerResult::Selected(
+            targets.into_iter().cloned().collect(),
+            verb,
+        )),
+        Err(msg) => {
+            state.message = Some(msg);
+            None
+        }
+    }
 }
 
 fn run_loop(
@@ -252,62 +332,104 @@ fn run_loop(
             continue;
         }
         state.message = None; // any keystroke clears the previous status line
+
+        // Universal Ctrl-modified shortcuts, work from either mode.
         if key.modifiers.contains(KeyModifiers::CONTROL) {
-            if key.code == KeyCode::Char('w') {
-                if state.config_missing {
-                    match crate::config::write_default() {
-                        Ok(path) => {
-                            state.config_missing = false;
-                            state.message =
-                                Some(format!("wrote default config to {}", path.display()));
+            match key.code {
+                KeyCode::Char('w') => {
+                    if state.config_missing {
+                        match crate::config::write_default() {
+                            Ok(path) => {
+                                state.config_missing = false;
+                                state.message =
+                                    Some(format!("wrote default config to {}", path.display()));
+                            }
+                            Err(e) => state.message = Some(format!("failed to write config: {e}")),
                         }
-                        Err(e) => state.message = Some(format!("failed to write config: {e}")),
                     }
+                    continue;
                 }
-                continue;
+                KeyCode::Char('x') => {
+                    state.config_missing_dismissed = true;
+                    continue;
+                }
+                KeyCode::Char('a') => {
+                    state.select_all_visible();
+                    continue;
+                }
+                KeyCode::Char('d') => {
+                    state.deselect_all();
+                    continue;
+                }
+                _ => {}
             }
+            // Note: Ctrl-I is deliberately absent - it's byte-identical
+            // to Tab (both 0x09) in terminal protocols, so it would
+            // silently toggle the mode instead of firing Insert (found
+            // by manual testing). Shift-Enter is the force-insert
+            // shortcut instead, matching the original exactly.
             let verb = match key.code {
                 KeyCode::Char('y') => Some(Verb::CopyRaw),
-                KeyCode::Char('i') => Some(Verb::Insert),
                 KeyCode::Char('o') => Some(Verb::Open),
                 KeyCode::Char('e') => Some(Verb::Edit),
                 KeyCode::Char('j') => Some(Verb::Json),
                 _ => None,
             };
-            if let Some(result) = verb.and_then(|v| select_with_verb(state, v)) {
-                return Ok(result);
+            if let Some(v) = verb {
+                if let Some(result) = try_fire(state, v) {
+                    return Ok(result);
+                }
             }
             continue;
         }
+
+        // Universal non-modified keys, work from either mode.
         match key.code {
             KeyCode::Esc => return Ok(PickerResult::Cancelled),
+            KeyCode::Tab => {
+                state.mode = match state.mode {
+                    Mode::Input => Mode::List,
+                    Mode::List => Mode::Input,
+                };
+                continue;
+            }
+            // Shift-Enter forces Insert regardless of the type's
+            // default - the original's shortcut for this; also where
+            // force-insert lives since Ctrl-I isn't usable (see above).
+            KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                if let Some(result) = try_fire(state, Verb::Insert) {
+                    return Ok(result);
+                }
+                continue;
+            }
             KeyCode::Enter => {
                 if let Some(m) = state.current_match() {
                     let verb = actions::default_verb(m.ty);
-                    return Ok(PickerResult::Selected(m.clone(), verb));
+                    if let Some(result) = try_fire(state, verb) {
+                        return Ok(result);
+                    }
                 }
-            }
-            KeyCode::Backspace => {
-                if state.query.pop().is_some() {
-                    state.refilter();
-                }
+                continue;
             }
             KeyCode::Up => {
                 let i = state.list_state.selected().unwrap_or(0);
                 if i > 0 {
                     state.list_state.select(Some(i - 1));
                 }
+                continue;
             }
             KeyCode::Down => {
                 let i = state.list_state.selected().unwrap_or(0);
                 if !state.filtered.is_empty() && i + 1 < state.filtered.len() {
                     state.list_state.select(Some(i + 1));
                 }
+                continue;
             }
             KeyCode::PageUp => {
                 let page = state.list_page_size();
                 let i = state.list_state.selected().unwrap_or(0);
                 state.list_state.select(Some(i.saturating_sub(page)));
+                continue;
             }
             KeyCode::PageDown => {
                 let page = state.list_page_size();
@@ -316,16 +438,40 @@ fn run_loop(
                     let next = (i + page).min(state.filtered.len() - 1);
                     state.list_state.select(Some(next));
                 }
-            }
-            KeyCode::Char(c)
-                if !key
-                    .modifiers
-                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
-            {
-                state.query.push(c);
-                state.refilter();
+                continue;
             }
             _ => {}
+        }
+
+        // Mode-specific: Input types into the query; List fires verbs.
+        match state.mode {
+            Mode::Input => match key.code {
+                KeyCode::Backspace => {
+                    if state.query.pop().is_some() {
+                        state.refilter();
+                    }
+                }
+                KeyCode::Char(c)
+                    if !key
+                        .modifiers
+                        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+                {
+                    state.query.push(c);
+                    state.refilter();
+                }
+                _ => {}
+            },
+            Mode::List => {
+                if key.code == KeyCode::Char(' ') {
+                    state.toggle_select_current();
+                } else if let KeyCode::Char(c) = key.code {
+                    if let Some(v) = actions::verb_from_char(c) {
+                        if let Some(result) = try_fire(state, v) {
+                            return Ok(result);
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -334,10 +480,15 @@ fn render(frame: &mut Frame, state: &mut State) {
     let area = frame.area();
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(1)])
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(1),
+            Constraint::Length(4),
+        ])
         .split(area);
     render_input(frame, chunks[0], state);
     render_list(frame, chunks[1], state);
+    render_footer_or_banner(frame, chunks[2], state);
 }
 
 fn render_input(frame: &mut Frame, area: Rect, state: &State) {
@@ -366,27 +517,30 @@ fn render_input(frame: &mut Frame, area: Rect, state: &State) {
         ));
         spans.push(Span::raw(" "));
     }
+    let count_text = if state.selected.is_empty() {
+        format!("{}/{}", state.filtered.len(), state.matches.len())
+    } else {
+        format!(
+            "{} sel * {}/{}",
+            state.selected.len(),
+            state.filtered.len(),
+            state.matches.len()
+        )
+    };
+    spans.push(Span::styled(count_text, Style::default().fg(MUTED)));
+    spans.push(Span::raw("   "));
+    let mode_tag = match state.mode {
+        Mode::Input => "[INPUT]",
+        Mode::List => "[LIST]",
+    };
     spans.push(Span::styled(
-        format!("{}/{}", state.filtered.len(), state.matches.len()),
-        Style::default().fg(MUTED),
+        mode_tag,
+        Style::default().fg(MUTED).add_modifier(Modifier::DIM),
     ));
-    if let Some(msg) = &state.message {
-        spans.push(Span::raw("   "));
-        spans.push(Span::styled(
-            msg.clone(),
-            Style::default().fg(HIGHLIGHT).add_modifier(Modifier::BOLD),
-        ));
-    } else if state.config_missing {
-        spans.push(Span::raw("   "));
-        spans.push(Span::styled(
-            "(Ctrl-W: write starter config)",
-            Style::default().fg(MUTED).add_modifier(Modifier::DIM),
-        ));
-    }
     let p = Paragraph::new(Line::from(spans)).block(
         Block::default()
             .borders(Borders::ALL)
-            .title("zextract  (Esc cancel, Enter select, #type filter)"),
+            .title("zextract  (Esc cancel, Tab mode, #type filter)"),
     );
     frame.render_widget(p, area);
 }
@@ -412,18 +566,29 @@ fn render_list(frame: &mut Frame, area: Rect, state: &mut State) {
         .iter()
         .filter_map(|s| state.matches.get(s.index).map(|m| (s, m)))
         .map(|(s, m)| {
+            // Leftmost gutter marks multi-selected rows; the `▸` cursor
+            // (highlight_symbol below) sits between this and the tag,
+            // so both signals coexist without colliding.
+            let gutter = if state.selected.contains(&s.index) {
+                Span::styled(
+                    "* ",
+                    Style::default().fg(HIGHLIGHT).add_modifier(Modifier::BOLD),
+                )
+            } else {
+                Span::raw("  ")
+            };
             let tag_span = Span::styled(
                 format!("[{}]  ", m.effective_tag()),
                 Style::default().fg(color_for_type(m.ty)),
             );
-            let tag_overhead = m.effective_tag().chars().count() + 6; // "[tag]  "
+            let tag_overhead = m.effective_tag().chars().count() + 8; // gutter(2) + "[tag]  "
             let avail = (area.width as usize).saturating_sub(tag_overhead);
             let use_middle = matches!(
                 m.ty,
                 MatchType::Url | MatchType::File | MatchType::Diagnostic | MatchType::Git
             );
             let display = truncate_display(&m.display, avail, use_middle);
-            let mut spans = vec![tag_span];
+            let mut spans = vec![gutter, tag_span];
             spans.extend(highlight_spans(&display, &s.indices, HIGHLIGHT));
             ListItem::new(Line::from(spans))
         })
@@ -439,6 +604,112 @@ fn render_list(frame: &mut Frame, area: Rect, state: &mut State) {
         )
         .highlight_symbol("▸ ");
     frame.render_stateful_widget(list, area, &mut state.list_state);
+}
+
+/// Bottom row: the config-missing banner takes priority (persistent
+/// until `Ctrl-W`/`Ctrl-X`), then a transient status `message`, then
+/// the default: a mode-aware footer of available verb-key hints for
+/// the highlighted match. Ported from the original's
+/// `render_banner`/`render_footer` split.
+fn render_footer_or_banner(frame: &mut Frame, area: Rect, state: &State) {
+    let bold = Style::default().add_modifier(Modifier::BOLD);
+    if state.config_missing && !state.config_missing_dismissed {
+        let lines = vec![
+            Line::from(vec![
+                Span::raw(" "),
+                Span::styled("No config file found", bold),
+                Span::raw("  -  defaults in use"),
+            ]),
+            Line::from(vec![
+                Span::raw(" "),
+                Span::styled("Ctrl-W", bold),
+                Span::raw(": write default config    "),
+                Span::styled("Ctrl-X", bold),
+                Span::raw(": dismiss"),
+            ]),
+        ];
+        let p = Paragraph::new(lines).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(HIGHLIGHT)),
+        );
+        frame.render_widget(p, area);
+        return;
+    }
+    if let Some(msg) = &state.message {
+        let p = Paragraph::new(Line::from(vec![
+            Span::raw(" "),
+            Span::styled(
+                msg.clone(),
+                Style::default().fg(HIGHLIGHT).add_modifier(Modifier::BOLD),
+            ),
+        ]))
+        .block(Block::default().borders(Borders::ALL));
+        frame.render_widget(p, area);
+        return;
+    }
+    render_footer(frame, area, state);
+}
+
+fn render_footer(frame: &mut Frame, area: Rect, state: &State) {
+    let bold = Style::default().add_modifier(Modifier::BOLD);
+    let dim = Style::default().fg(MUTED);
+
+    let mut line1: Vec<Span<'static>> = Vec::new();
+    if let Some(m) = state.current_match() {
+        let default = actions::default_verb(m.ty);
+        line1.push(Span::styled(
+            format!(" {}", m.effective_tag()),
+            Style::default()
+                .fg(color_for_type(m.ty))
+                .add_modifier(Modifier::BOLD),
+        ));
+        line1.push(Span::raw("  *  "));
+        line1.push(Span::styled("Enter", bold));
+        line1.push(Span::raw(format!(":{}  ", default.label())));
+
+        if state.mode == Mode::List {
+            for &verb in actions::allowed_verbs(m.ty) {
+                if verb == default {
+                    continue; // already shown as Enter:label
+                }
+                line1.push(Span::styled(verb.key_label(), bold));
+                line1.push(Span::raw(format!(":{}  ", verb.label())));
+            }
+            line1.push(Span::styled("J", bold));
+            line1.push(Span::raw(":export  "));
+            line1.push(Span::styled("Space", bold));
+            line1.push(Span::raw(":select  "));
+        }
+    } else {
+        line1.push(Span::raw(" "));
+        line1.push(Span::styled("no selection", dim));
+    }
+
+    // Universal-shortcut hints, shown in Input mode only - in List
+    // mode the plain-letter equivalents are already on line 1, so
+    // repeating the Ctrl-/Tab- forms would clutter without adding
+    // info. The shortcuts still work in List mode, just hidden here.
+    let mut line2: Vec<Span<'static>> = vec![Span::raw(" ")];
+    if state.mode == Mode::Input {
+        line2.push(Span::styled("Tab", bold));
+        line2.push(Span::raw(":list mode    "));
+        line2.push(Span::styled("Ctrl-Y", bold));
+        line2.push(Span::raw(":copy    "));
+        line2.push(Span::styled("Ctrl-A", bold));
+        line2.push(Span::raw("/"));
+        line2.push(Span::styled("Ctrl-D", bold));
+        line2.push(Span::raw(":select all/none"));
+    } else {
+        line2.push(Span::styled(
+            format!("{} selected", state.selected.len()),
+            dim,
+        ));
+    }
+
+    let p = Paragraph::new(vec![Line::from(line1), Line::from(line2)])
+        .block(Block::default().borders(Borders::ALL));
+    frame.render_widget(p, area);
 }
 
 /// Ported from the original `main.rs::truncate_display` verbatim.
