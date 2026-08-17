@@ -137,7 +137,7 @@ fn run() -> Result<(), String> {
         matches,
         &custom_tags,
         config_missing,
-        &config.colors,
+        &config,
         &initial_query,
     )
     .map_err(|e| format!("picker failed: {e}"))?;
@@ -147,7 +147,7 @@ fn run() -> Result<(), String> {
             // Insert always targets the pane the plugin was launched
             // from, regardless of which pane a multi-pane match came
             // from - ctx.focused_pane_id, not any per-match pane id.
-            match actions::execute_batch(verb, &refs, &ctx.focused_pane_id) {
+            match actions::execute_batch(verb, &refs, &ctx.focused_pane_id, &config) {
                 actions::Outcome::Done(msg) => println!("{msg}"),
                 actions::Outcome::Failed(msg) => println!("error: {msg}"),
             }

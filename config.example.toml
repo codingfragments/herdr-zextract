@@ -224,3 +224,43 @@ flag_anchored = false
 # type_quoted    = "#a89984"
 # type_command   = "#d3869b"
 # type_secret    = "#fb4934"
+
+# [types.<tag>] — per-type verb allow-list/default override. <tag> is a
+# built-in type tag (url, file, diag, git, sha, ipv4, ipv6, uuid, quote,
+# cmd, secret) or a custom pattern's configured name. `copy-raw`/`json`
+# are always allowed for every type regardless of `actions`; `open`/
+# `edit`/`reveal` are always denied for `secret` regardless of config.
+# Verb names: copy-raw, copy-display, insert, insert-display, open,
+# edit, reveal, json.
+#
+# [types.url]
+# actions = ["open", "copy-raw"]   # drop insert for url matches
+# default = "copy-raw"             # Enter copies instead of opening
+
+# [actions.<tag>] — command templates for open/edit/reveal, run via a
+# shell. <tag> is a built-in type tag, a custom pattern name, or
+# "default" (fallback for any type not explicitly listed here).
+# Template variables: {editor} {file} {line} {url} {match} {raw}
+# {display} {type} {context}, plus numbered capture groups {0}..{N}
+# for custom patterns. When {line} resolves empty, one trailing
+# separator character (":", "+", or space) right before it in the
+# template is stripped too, so "hx {file}:{line}" degrades to
+# "hx src/main.rs" rather than "hx src/main.rs:".
+#
+# [actions.file]
+# edit = "hx {file}:{line}"
+#
+# [actions.default]
+# open = "open {raw}"
+
+# [limits] — per-verb caps on multi-target dispatch. Omit a key to keep
+# its built-in default (copy/json 100, insert/edit 5, open/reveal 10).
+# 0 disables that verb entirely, for every type.
+#
+# [limits]
+# copy = 100     # caps copy-raw/copy-display together
+# insert = 5     # caps insert/insert-display together
+# open = 10
+# edit = 5
+# reveal = 10
+# json = 100

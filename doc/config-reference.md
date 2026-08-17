@@ -24,11 +24,13 @@ from uses KDL, matching Zellij's own config format. This port uses TOML
 instead, matching Herdr's own config conventions (`config.toml`,
 `herdr-plugin.toml`).
 
-**Scope note:** the `patterns { }` block and `[profiles.<name>]` below
-are ported so far (PLANNING.md §11 Phases 5 and 7). The original's
-`ui`, `colors`, `limits`, `types`, and `actions` blocks — theming,
-per-verb caps, and action-template overrides — aren't built yet; this
-doc will grow as later phases add them.
+**Scope note:** every block below is ported as of PLANNING.md §11 Phase
+8 — `log_level`, `[grab_profiles.<name>]`, `patterns.command.flag_anchored`,
+`[ui]`/`[profiles.<name>].preview`, `[colors]`, and `[types]`/
+`[actions]`/`[limits]` all reached 100% parity with the original's
+`zextract.kdl` surface in that phase. Preview pane *rendering* itself
+is still Phase 9 — `[ui].preview` is parsed and resolved but has
+nothing to render against yet.
 
 ---
 
@@ -334,3 +336,101 @@ are included as commented blocks in
 time. Not yet ported: preview-pane match-line highlighting doesn't
 exist yet (Phase 9), so `highlight`'s preview-related use from the
 original doesn't apply here yet either.
+
+---
+
+## `[types.<tag>]` — per-type verb allow-list and default-verb override
+
+```toml
+[types.url]
+actions = ["open", "copy-raw"]
+default = "copy-raw"
+```
+
+`<tag>` is a built-in type tag (see the list under `[patterns]` above)
+or a custom pattern's configured `name`.
+
+| Key | Description |
+|---|---|
+| `actions` | Verbs available for this type, replacing the built-in allow-list entirely. Unrecognized verb names are silently dropped. |
+| `default` | Verb fired by `Enter`. Falls back to the built-in default if unset, or if it names a verb not in the (possibly overridden) `actions` list — in that case the first allowed verb wins instead. |
+
+**Verb names** (as used in `actions`/`default`, and distinct from the
+picker's own key labels): `copy-raw`, `copy-display`, `insert`,
+`insert-display`, `open`, `edit`, `reveal`, `json`.
+
+**Hardcoded exceptions, preserved regardless of this block:**
+`copy-raw` and `json` are always allowed for every type; `open`,
+`edit`, and `reveal` are always denied for `secret`.
+
+**Interaction with `[limits]`:** a verb whose `[limits]` cap is set to
+`0` is dropped from every type's allow-list, even one that explicitly
+lists it here.
+
+---
+
+## `[actions.<tag>]` — command templates for open/edit/reveal
+
+```toml
+[actions.file]
+edit = "hx {file}:{line}"
+
+[actions.default]
+open = "open {raw}"
+```
+
+`<tag>` is a built-in type tag, a custom pattern's configured `name`,
+or the literal `"default"` — consulted for any type with no
+tag-specific override for that verb.
+
+| Key | Description |
+|---|---|
+| `open` | Command template run in place of the built-in `open`/`xdg-open` invocation. |
+| `edit` | Command template run in place of the built-in `$EDITOR [+line] file` invocation (also used per-file in a multi-target edit batch). |
+| `reveal` | Command template run in place of the built-in `open -R`/`xdg-open <parent>` invocation. |
+
+Each template is run through `sh -c` after variable substitution.
+
+### Template variables
+
+| Variable | Value |
+|---|---|
+| `{editor}` | `$EDITOR`, falling back to `vi` |
+| `{file}` | The match's `file` field, falling back to `raw` |
+| `{line}` | The match's `line` field, empty if absent |
+| `{url}` | The match's `url` field, falling back to `raw` |
+| `{match}` | The match's `match` field (custom patterns), falling back to `raw` |
+| `{raw}` | The match's raw value |
+| `{display}` | The match's display value |
+| `{type}` | The match's effective `#tag` |
+| `{context}` | The full source line the match came from |
+| `{0}`..`{N}` | Numbered capture groups, for custom patterns |
+
+Unknown `{name}` tokens are left literal. When `{line}` resolves
+empty, one trailing separator character (`:`, `+`, or a space)
+immediately preceding it in the template is stripped too, so
+`"hx {file}:{line}"` degrades to `"hx src/main.rs"` rather than
+`"hx src/main.rs:"`.
+
+---
+
+## `[limits]` — per-verb multi-target dispatch caps
+
+```toml
+[limits]
+insert = 1
+```
+
+| Key | Default | Caps |
+|---|---|---|
+| `copy` | 100 | `copy-raw` and `copy-display` batches together |
+| `insert` | 5 | `insert` and `insert-display` batches together |
+| `open` | 10 | `open` |
+| `edit` | 5 | `edit` |
+| `reveal` | 10 | `reveal` |
+| `json` | 100 | `json` |
+
+Omitting a key keeps its built-in default. Setting a key to `0`
+disables that verb entirely, for every type — the picker refuses it
+the same way it refuses a type-mismatched verb, rather than treating it
+as "cap exceeded."

@@ -209,6 +209,9 @@ struct State {
     /// and reappears already-selected when the filter brings it back).
     selected: HashSet<usize>,
     theme: Theme,
+    /// Cloned once at startup - `[types.<tag>]`/`[limits]` drive the
+    /// footer's allowed-verb hints and `try_fire`'s batch-cap checks.
+    config: crate::config::Config,
 }
 
 impl State {
@@ -216,7 +219,7 @@ impl State {
         matches: Vec<Match>,
         custom_tags: Vec<String>,
         config_missing: bool,
-        colors: &crate::config::ColorsConfig,
+        config: &crate::config::Config,
         initial_query: &str,
     ) -> Self {
         let mut state = Self {
@@ -233,7 +236,8 @@ impl State {
             message: None,
             mode: Mode::Input,
             selected: HashSet::new(),
-            theme: Theme::resolve(colors),
+            theme: Theme::resolve(&config.colors),
+            config: config.clone(),
         };
         state.refilter();
         state
@@ -388,14 +392,14 @@ pub fn run(
     matches: Vec<Match>,
     custom_tags: &[String],
     config_missing: bool,
-    colors: &crate::config::ColorsConfig,
+    config: &crate::config::Config,
     initial_query: &str,
 ) -> io::Result<PickerResult> {
     let mut state = State::new(
         matches,
         custom_tags.to_vec(),
         config_missing,
-        colors,
+        config,
         initial_query,
     );
 
@@ -430,7 +434,7 @@ fn try_fire(state: &mut State, verb: Verb) -> Option<PickerResult> {
     if targets.is_empty() {
         return None;
     }
-    match actions::plan_batch(verb, &targets) {
+    match actions::plan_batch(verb, &targets, &state.config) {
         Ok(()) => Some(PickerResult::Selected(
             targets.into_iter().cloned().collect(),
             verb,
@@ -533,7 +537,7 @@ fn run_loop(
             }
             KeyCode::Enter => {
                 if let Some(m) = state.current_match() {
-                    let verb = actions::default_verb(m.ty);
+                    let verb = actions::default_verb(m, &state.config);
                     if let Some(result) = try_fire(state, verb) {
                         return Ok(result);
                     }
@@ -831,7 +835,7 @@ fn render_footer(frame: &mut Frame, area: Rect, state: &State) {
 
     let mut line1: Vec<Span<'static>> = Vec::new();
     if let Some(m) = state.current_match() {
-        let default = actions::default_verb(m.ty);
+        let default = actions::default_verb(m, &state.config);
         line1.push(Span::styled(
             format!(" {}", m.effective_tag()),
             Style::default()
@@ -843,7 +847,7 @@ fn render_footer(frame: &mut Frame, area: Rect, state: &State) {
         line1.push(Span::raw(format!(":{}  ", default.label())));
 
         if state.mode == Mode::List {
-            for &verb in actions::allowed_verbs(m.ty) {
+            for verb in actions::allowed_verbs(m, &state.config) {
                 if verb == default {
                     continue; // already shown as Enter:label
                 }

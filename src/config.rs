@@ -12,14 +12,15 @@
 //! pattern allowlist, and query pre-fill, selected at launch by
 //! `ZEXTRACT_PROFILE` - see `doc/config-reference.md`.
 //!
-//! Phase 8 adds `log_level` and `[grab_profiles.<name>]` - see
-//! `doc/config-reference.md`.
+//! Phase 8 closes out 100% config parity with the original: `log_level`,
+//! `[grab_profiles.<name>]`, `patterns.command.flag_anchored`, `[ui]` +
+//! `[profiles.<name>].preview`, `[colors]`, and `[types]`/`[actions]`/
+//! `[limits]` (per-type verb overrides, action command templates,
+//! per-verb dispatch caps - consumed by `actions.rs`). See
+//! `doc/config-reference.md` for the full surface.
 //!
-//! Not ported (out of scope for this phase, see PLANNING.md §11 Phase 5):
-//! `ui`, `colors`, `limits`, `types`, `actions` blocks - those configure
-//! UI/action-template surfaces this port hasn't built yet. Live reload
-//! is also out of scope - config is read once per invocation, matching
-//! the original's snapshot-once model.
+//! Live reload is out of scope - config is read once per invocation,
+//! matching the original's snapshot-once model.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -117,6 +118,48 @@ struct RawConfig {
     ui: UiConfig,
     #[serde(default)]
     colors: ColorsConfig,
+    #[serde(default)]
+    types: std::collections::HashMap<String, TypeOverride>,
+    #[serde(default)]
+    actions: std::collections::HashMap<String, ActionTemplate>,
+    #[serde(default)]
+    limits: LimitsConfig,
+}
+
+/// `[types.<tag>]` - per-type verb allow-list/default override.
+/// Keys are built-in type tags or custom pattern names.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct TypeOverride {
+    /// Verbs available for this type, replacing the built-in list
+    /// entirely. Unrecognized verb names are silently dropped.
+    pub actions: Option<Vec<String>>,
+    /// Verb fired by `Enter`. Falls back to the built-in default if
+    /// not present in the (possibly overridden) allow-list.
+    pub default: Option<String>,
+}
+
+/// `[actions.<tag>]` - command templates for `open`/`edit`/`reveal`.
+/// Keys are type tags or `"default"` (fallback for any type not
+/// explicitly listed).
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct ActionTemplate {
+    pub open: Option<String>,
+    pub edit: Option<String>,
+    pub reveal: Option<String>,
+}
+
+/// `[limits]` - per-verb caps on multi-target dispatch. `0` disables a
+/// verb entirely. `None` (key omitted) keeps that verb's built-in cap.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct LimitsConfig {
+    /// Caps `copy-raw`/`copy-display` batches together.
+    pub copy: Option<u32>,
+    /// Caps `insert`/`insert-display` batches together.
+    pub insert: Option<u32>,
+    pub open: Option<u32>,
+    pub edit: Option<u32>,
+    pub reveal: Option<u32>,
+    pub json: Option<u32>,
 }
 
 /// `[colors]` block - full UI palette override, ported from the
@@ -295,6 +338,9 @@ pub struct Config {
     pub grab_profiles: std::collections::HashMap<String, GrabProfileOverride>,
     pub ui: UiConfig,
     pub colors: ColorsConfig,
+    pub types: std::collections::HashMap<String, TypeOverride>,
+    pub actions: std::collections::HashMap<String, ActionTemplate>,
+    pub limits: LimitsConfig,
 }
 
 impl Default for Config {
@@ -309,6 +355,9 @@ impl Default for Config {
             grab_profiles: std::collections::HashMap::new(),
             ui: UiConfig::default(),
             colors: ColorsConfig::default(),
+            types: std::collections::HashMap::new(),
+            actions: std::collections::HashMap::new(),
+            limits: LimitsConfig::default(),
         }
     }
 }
@@ -418,6 +467,9 @@ impl Config {
                 grab_profiles: raw.grab_profiles,
                 ui: raw.ui,
                 colors: raw.colors,
+                types: raw.types,
+                actions: raw.actions,
+                limits: raw.limits,
             },
             Err(e) => {
                 // log_level can't be consulted here - it lives in the
