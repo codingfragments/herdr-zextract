@@ -9,9 +9,16 @@
 //!      the trigger to end-of-line. No continuation splicing for the exec
 //!      flavor — too risky when embedded in prose.
 //!
-//! The original plugin also has three opt-in passes (flag-anchored,
-//! extension-anchored, comment-anchored) that are off by default there
-//! too — not ported here; revisit in Phase 5 if wanted.
+//!   3. FLAG-ANCHORED (opt-in, off by default - `patterns.command.
+//!      flag_anchored`): only tried when 1 and 2 both found nothing on
+//!      a line. Finds the leftmost standalone `-x`/`-xyz`/`--long-flag`
+//!      token, walks backward to the nearest boundary character, then
+//!      forward past whitespace to the command word. Guards: command
+//!      word must start with a lowercase ASCII letter and be ≥2 chars.
+//!      No continuation splicing, same as strategy 2.
+//!
+//! The original plugin also has two further opt-in passes
+//! (extension-anchored, comment-anchored) not ported here.
 //!
 //! Captures `{match}` (and `{hint}` when an inline `# comment` follows).
 
@@ -150,6 +157,11 @@ const CONTINUATION_STRIP: &[&str] = &[
     r"^\s+",             // leading whitespace (catchall)
 ];
 
+fn flag_regex() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"-{1,2}[A-Za-z][A-Za-z0-9-]*").expect("flag regex compiles"))
+}
+
 fn trigger_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
@@ -185,7 +197,7 @@ fn regex_escape(s: &str) -> String {
         .collect()
 }
 
-pub fn extract(text: &str) -> Vec<Match> {
+pub fn extract(text: &str, flag_anchored: bool) -> Vec<Match> {
     let lines: Vec<&str> = text.lines().collect();
     let line_offsets: Vec<usize> = compute_line_offsets(&lines);
 
@@ -232,6 +244,7 @@ pub fn extract(text: &str) -> Vec<Match> {
         // 2. EXEC-ANCHORED (fallback). No continuation splice — too risky in prose.
         // Scan only the pre-comment portion so triggers inside `# …` or `// …`
         // inline comments are not matched.
+        let mut matched = false;
         if let Some(start_col) = match_exec(pre_comment_line(line)) {
             let (cmd_no_comment, hint) = strip_inline_comment(&line[start_col..]);
             let raw_cmd = trim_rprompt(cmd_no_comment, RPROMPT_MIN_SPACES).trim_end();
@@ -245,6 +258,27 @@ pub fn extract(text: &str) -> Vec<Match> {
                     span_start,
                     span_end,
                 ));
+                matched = true;
+            }
+        }
+
+        // 3. FLAG-ANCHORED (opt-in, fallback of last resort). Only
+        // tried when neither 1 nor 2 found anything on this line.
+        if !matched && flag_anchored {
+            if let Some(word_start) = match_flag_anchored(line) {
+                let (cmd_no_comment, hint) = strip_inline_comment(&line[word_start..]);
+                let raw_cmd = trim_rprompt(cmd_no_comment, RPROMPT_MIN_SPACES).trim_end();
+                if looks_like_command(raw_cmd) {
+                    let span_start = line_offsets[i] + word_start;
+                    let span_end = span_start + raw_cmd.len();
+                    out.push(make_match(
+                        raw_cmd.to_string(),
+                        hint,
+                        line.to_string(),
+                        span_start,
+                        span_end,
+                    ));
+                }
             }
         }
     }
@@ -308,6 +342,73 @@ fn ok_command_preceding_byte(b: Option<u8>) -> bool {
         // standalone command word.
         _ => false,
     }
+}
+
+/// Strategy 3 (opt-in). Finds the leftmost standalone flag token on
+/// `line` and walks back to the command word that owns it. Returns the
+/// byte offset of the command word's start, or `None` if no flag/no
+/// command word passes the guards.
+fn match_flag_anchored(line: &str) -> Option<usize> {
+    let bytes = line.as_bytes();
+    for m in flag_regex().find_iter(line) {
+        let start = m.start();
+        let prev = if start == 0 {
+            None
+        } else {
+            bytes.get(start - 1).copied()
+        };
+        let standalone = match prev {
+            None => true,
+            Some(b) if b.is_ascii_whitespace() => true,
+            Some(b'(' | b'&' | b'|' | b';' | b'=') => true,
+            _ => false,
+        };
+        if !standalone {
+            continue;
+        }
+
+        // Walk backward to the nearest boundary char, then forward
+        // past any whitespace, to find the command word's start.
+        let mut word_start = 0usize;
+        let mut i = start;
+        while i > 0 {
+            i -= 1;
+            if is_flag_boundary_byte(bytes[i]) {
+                word_start = i + 1;
+                break;
+            }
+        }
+        while word_start < start && bytes[word_start].is_ascii_whitespace() {
+            word_start += 1;
+        }
+
+        let rest = &line[word_start..];
+        let first_char_lowercase = rest.chars().next().is_some_and(|c| c.is_ascii_lowercase());
+        let first_word_len = rest.split_whitespace().next().map(str::len).unwrap_or(0);
+        if first_char_lowercase && first_word_len >= 2 {
+            return Some(word_start);
+        }
+    }
+    None
+}
+
+fn is_flag_boundary_byte(b: u8) -> bool {
+    matches!(
+        b,
+        b']' | b'['
+            | b'}'
+            | b'{'
+            | b'>'
+            | b'<'
+            | b':'
+            | b';'
+            | b'|'
+            | b'&'
+            | b'('
+            | b','
+            | b'\''
+            | b'"'
+    )
 }
 
 /// Splice a command's continuation lines (trailing `\`). Returns
@@ -454,28 +555,34 @@ mod tests {
 
     #[test]
     fn prompt_anchored_simple() {
-        let m = extract("$ git log --oneline -n 20");
+        let m = extract("$ git log --oneline -n 20", false);
         assert_eq!(m.len(), 1);
         assert_eq!(m[0].raw, "git log --oneline -n 20");
     }
 
     #[test]
     fn prompt_anchored_unicode() {
-        let m = extract("❯ cargo build --release");
+        let m = extract("❯ cargo build --release", false);
         assert_eq!(m.len(), 1);
         assert_eq!(m[0].raw, "cargo build --release");
     }
 
     #[test]
     fn exec_anchored_in_prose() {
-        let m = extract("To install run sudo apt install zellij from the README.");
+        let m = extract(
+            "To install run sudo apt install zellij from the README.",
+            false,
+        );
         assert_eq!(m.len(), 1);
         assert!(m[0].raw.starts_with("sudo apt install zellij"));
     }
 
     #[test]
     fn exec_anchored_pipeline_kept_together() {
-        let m = extract("curl -fsSL https://example.com/install.sh | sudo bash");
+        let m = extract(
+            "curl -fsSL https://example.com/install.sh | sudo bash",
+            false,
+        );
         assert_eq!(m.len(), 1);
         assert!(m[0].raw.contains("curl"));
         assert!(m[0].raw.contains("| sudo bash"));
@@ -484,7 +591,7 @@ mod tests {
     #[test]
     fn continuation_splicing_basic() {
         let text = "$ curl -fsSL https://example.com/install.sh \\\n    | sudo bash";
-        let m = extract(text);
+        let m = extract(text, false);
         assert_eq!(m.len(), 1);
         assert_eq!(
             m[0].raw,
@@ -495,7 +602,7 @@ mod tests {
     #[test]
     fn continuation_strips_line_number_prefix() {
         let text = "$ curl -fsSL https://example.com/install.sh \\\n2:  | sudo bash";
-        let m = extract(text);
+        let m = extract(text, false);
         assert_eq!(m.len(), 1);
         assert_eq!(
             m[0].raw,
@@ -506,7 +613,7 @@ mod tests {
     #[test]
     fn continuation_strips_diff_marker() {
         let text = "$ curl -fsSL https://example.com/install.sh \\\n+   | sudo bash";
-        let m = extract(text);
+        let m = extract(text, false);
         assert_eq!(
             m[0].raw,
             "curl -fsSL https://example.com/install.sh | sudo bash"
@@ -521,7 +628,7 @@ mod tests {
             text.push_str("\n  hello \\");
         }
         text.push_str("\n  final");
-        let m = extract(&text);
+        let m = extract(&text, false);
         assert_eq!(m.len(), 1);
         let backslash_count = m[0].raw.matches('\\').count();
         assert!(backslash_count > 0);
@@ -529,47 +636,94 @@ mod tests {
 
     #[test]
     fn prompt_wins_over_exec_on_same_line() {
-        let m = extract("❯ sudo apt install foo");
+        let m = extract("❯ sudo apt install foo", false);
         assert_eq!(m.len(), 1);
         assert_eq!(m[0].raw, "sudo apt install foo");
     }
 
     #[test]
     fn no_match_in_random_prose() {
-        let m = extract("the quick brown fox jumps over the lazy dog");
+        let m = extract("the quick brown fox jumps over the lazy dog", false);
         assert!(m.is_empty());
     }
 
     #[test]
     fn rejects_trigger_inside_filename() {
-        let m = extract("Downloaded install.sh from the mirror");
+        let m = extract("Downloaded install.sh from the mirror", false);
         assert!(m.is_empty(), "false positive: {m:?}");
     }
 
     #[test]
     fn rejects_trigger_inside_path() {
-        let m = extract("path/to/sh detected");
+        let m = extract("path/to/sh detected", false);
         assert!(m.is_empty(), "false positive: {m:?}");
     }
 
     #[test]
     fn still_triggers_after_space() {
-        let m = extract("Run sh -c 'foo' please");
+        let m = extract("Run sh -c 'foo' please", false);
         assert_eq!(m.len(), 1);
         assert!(m[0].raw.starts_with("sh"));
     }
 
     #[test]
     fn zellij_exec_anchored_in_output() {
-        let m = extract("[dry-run] zellij --session claude-chats --layout cfdefault.kdl");
+        let m = extract(
+            "[dry-run] zellij --session claude-chats --layout cfdefault.kdl",
+            false,
+        );
         assert_eq!(m.len(), 1);
         assert!(m[0].raw.starts_with("zellij --session"));
     }
 
     #[test]
     fn tmux_exec_anchored() {
-        let m = extract("running: tmux new-session -s main");
+        let m = extract("running: tmux new-session -s main", false);
         assert_eq!(m.len(), 1);
         assert!(m[0].raw.starts_with("tmux new-session"));
+    }
+
+    #[test]
+    fn flag_anchored_off_by_default_misses_non_trigger_command() {
+        // "jq" isn't in TRIGGERS, so with flag_anchored off neither
+        // strategy 1 nor 2 can catch this - exactly the gap strategy 3
+        // exists to close.
+        let m = extract("[dry-run] jq -r '.foo' file.json", false);
+        assert!(m.is_empty());
+    }
+
+    #[test]
+    fn flag_anchored_on_catches_non_trigger_command() {
+        let m = extract("[dry-run] jq -r '.foo' file.json", true);
+        assert_eq!(m.len(), 1);
+        assert!(m[0].raw.starts_with("jq -r"), "got: {:?}", m[0].raw);
+    }
+
+    #[test]
+    fn flag_anchored_rejects_uppercase_start() {
+        let m = extract("The --verbose flag is nice", true);
+        assert!(m.is_empty(), "false positive: {m:?}");
+    }
+
+    #[test]
+    fn flag_anchored_rejects_single_char_word() {
+        let m = extract("a --long-flag value", true);
+        assert!(m.is_empty(), "false positive: {m:?}");
+    }
+
+    #[test]
+    fn flag_anchored_accepts_two_char_word() {
+        let m = extract("ab --long-flag value", true);
+        assert_eq!(m.len(), 1);
+        assert!(m[0].raw.starts_with("ab --long-flag"));
+    }
+
+    #[test]
+    fn flag_anchored_yields_to_exec_anchored_on_same_line() {
+        // "git" is a trigger, so strategy 2 should win outright -
+        // strategy 3 must not also fire and produce a second match.
+        let m = extract("git commit -m 'fix bug'", true);
+        assert_eq!(m.len(), 1);
+        assert!(m[0].raw.starts_with("git commit"));
     }
 }

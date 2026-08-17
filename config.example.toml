@@ -8,6 +8,17 @@
 # Full reference: doc/config-reference.md in the plugin repo.
 # This file is read once per popup launch - no live reload.
 
+# Verbosity of stderr diagnostics. One of: off, error, warn, info, debug.
+# log_level = "info"
+
+[ui]
+# Preview pane launch-state default. One of: off, auto, always.
+# "auto" behaves the same as "off" here - this port has no persisted
+# last-session state to remember across invocations.
+# preview = "off"
+# preview_open_width = "90%"
+# preview_closed_width = "70%"
+
 [patterns]
 # Built-in type tags or custom pattern names to skip entirely.
 # Built-in tags: url, file, diag, git, sha, ipv4, ipv6, uuid, quote, cmd, secret
@@ -17,6 +28,14 @@
 # Curated formats (JWT, AWS, GitHub, ...) always run. Set false to
 # disable the broader entropy-based fallback pass.
 entropy_filter = true
+
+[patterns.command]
+# Opt-in third command-detection strategy: finds a standalone -x/--flag
+# token and walks back to the command word, for commands with no
+# recognized prompt marker and no known trigger word (e.g. `[dry-run]
+# jq -r '.foo' file.json`). Off by default - can false-positive on
+# prose containing flag-looking tokens.
+flag_anchored = false
 
 # Custom regex patterns. Each gets its own #name filter tag in the
 # picker. Uncomment and adjust, or add your own [[patterns.custom]]
@@ -51,6 +70,13 @@ entropy_filter = true
 # grab = "tab-scan"
 # patterns = ["url", "ipv4", "ipv6"]
 #
+# `preview` forces the preview pane open/closed for one specific
+# keybind, overriding [ui].preview's default. One of: on, off, always,
+# never. Add it to any [profiles.*] block above, e.g.:
+#   [profiles.url]
+#   patterns = ["url", "ipv4", "ipv6"]
+#   preview = "always"
+#
 # Ten free slots (custom0..custom9) with no built-in default - bind a
 # key to the matching zextract-customN action in herdr-plugin.toml,
 # then define whatever combination you want here. Example: secrets
@@ -59,3 +85,189 @@ entropy_filter = true
 # [profiles.custom0]
 # grab = "deep"
 # patterns = ["secret"]
+
+# Named grab-profile *definitions* - what "quick"/"deep"/etc. actually
+# mean (source + line cap), as opposed to [profiles.*] above (which
+# only ever *selects* a grab profile by name). Built-in defaults for
+# quick/deep/viewport/full/tab-scan work with zero config here; add a
+# block only to override one, or define a wholly new name.
+#
+# [grab_profiles.deep]
+# source = "scrollback"   # scrollback | viewport | tab
+# lines = 3000             # override the built-in 1500
+#
+# [grab_profiles.tab-scan]
+# disable = ["secret", "ipv6"]   # skip these only while this profile is active
+#
+# A wholly custom grab profile - any name not in the built-in five
+# (quick/deep/viewport/full/tab-scan) works the same way, selected by
+# a [profiles.<name>] block's `grab = "<name>"`. Deactivated (commented
+# out) by default; uncomment and bind it to a [profiles.*] block to
+# use it.
+#
+# [grab_profiles.jira-deep]
+# source = "scrollback"
+# lines = 500
+# disable = ["secret"]   # skip secrets only while this profile is active
+
+# [colors] — full UI palette override. Every key is optional; omit any
+# key (or the whole block) to keep the built-in ANSI-palette default
+# for that slot. Values accept an ANSI name, "#rrggbb" hex, or
+# "rgb(r,g,b)". Uncomment ONE preset block below, or hand-pick
+# individual keys - don't uncomment more than one [colors] block.
+#
+# Slot reference:
+#   muted         — gutters, hints, secondary text, empty-state messages
+#   accent        — selected-item "*" gutter
+#   cursor_bg     — list cursor row background
+#   cursor_fg     — list cursor row foreground (must contrast cursor_bg)
+#   highlight     — fuzzy-match chars, banner border, footer status messages
+#   error         — rejection/failure status messages
+#   fallback_type — color for a custom pattern with no dedicated type_* slot
+#   type_url type_file type_diag type_git type_sha type_ipv4 type_ipv6
+#   type_uuid type_quoted type_command type_secret — per-#tag colors
+#
+# Catppuccin Mocha (dark)
+# [colors]
+# muted          = "#585b70"
+# accent         = "#89dceb"
+# cursor_bg      = "#89b4fa"
+# cursor_fg      = "#1e1e2e"
+# highlight      = "#f9e2af"
+# error          = "#f38ba8"
+# fallback_type  = "#a6adc8"
+# type_url       = "#89b4fa"
+# type_file      = "#a6e3a1"
+# type_diag      = "#f38ba8"
+# type_git       = "#f9e2af"
+# type_sha       = "#fab387"
+# type_ipv4      = "#89dceb"
+# type_ipv6      = "#74c7ec"
+# type_uuid      = "#cba6f7"
+# type_quoted    = "#a6adc8"
+# type_command   = "#f5c2e7"
+# type_secret    = "#eba0ac"
+#
+# Catppuccin Macchiato (dark)
+# [colors]
+# muted          = "#5b6078"
+# accent         = "#91d7e3"
+# cursor_bg      = "#8aadf4"
+# cursor_fg      = "#24273a"
+# highlight      = "#f5a97f"
+# error          = "#ed8796"
+# fallback_type  = "#b8c0e0"
+# type_url       = "#8aadf4"
+# type_file      = "#a6da95"
+# type_diag      = "#ed8796"
+# type_git       = "#eed49f"
+# type_sha       = "#f5a97f"
+# type_ipv4      = "#91d7e3"
+# type_ipv6      = "#7dc4e4"
+# type_uuid      = "#c6a0f6"
+# type_quoted    = "#b8c0e0"
+# type_command   = "#f5bde6"
+# type_secret    = "#ee99a0"
+#
+# Catppuccin Latte (light)
+# [colors]
+# muted          = "#acb0be"
+# accent         = "#04a5e5"
+# cursor_bg      = "#1e66f5"
+# cursor_fg      = "#eff1f5"
+# highlight      = "#df8e1d"
+# error          = "#d20f39"
+# fallback_type  = "#5c5f77"
+# type_url       = "#1e66f5"
+# type_file      = "#40a02b"
+# type_diag      = "#d20f39"
+# type_git       = "#df8e1d"
+# type_sha       = "#fe640b"
+# type_ipv4      = "#04a5e5"
+# type_ipv6      = "#209fb5"
+# type_uuid      = "#8839ef"
+# type_quoted    = "#6c6f85"
+# type_command   = "#ea76cb"
+# type_secret    = "#e64553"
+#
+# Tokyo Night
+# [colors]
+# muted          = "#565f89"
+# accent         = "#7dcfff"
+# cursor_bg      = "#7aa2f7"
+# cursor_fg      = "#1a1b26"
+# highlight      = "#e0af68"
+# error          = "#f7768e"
+# fallback_type  = "#9aa5ce"
+# type_url       = "#7aa2f7"
+# type_file      = "#9ece6a"
+# type_diag      = "#f7768e"
+# type_git       = "#e0af68"
+# type_sha       = "#ff9e64"
+# type_ipv4      = "#7dcfff"
+# type_ipv6      = "#2ac3de"
+# type_uuid      = "#bb9af7"
+# type_quoted    = "#9aa5ce"
+# type_command   = "#ff007c"
+# type_secret    = "#db4b4b"
+#
+# Gruvbox Dark
+# [colors]
+# muted          = "#928374"
+# accent         = "#8ec07c"
+# cursor_bg      = "#458588"
+# cursor_fg      = "#282828"
+# highlight      = "#d79921"
+# error          = "#cc241d"
+# fallback_type  = "#a89984"
+# type_url       = "#458588"
+# type_file      = "#98971a"
+# type_diag      = "#cc241d"
+# type_git       = "#d79921"
+# type_sha       = "#d65d0e"
+# type_ipv4      = "#689d6a"
+# type_ipv6      = "#8ec07c"
+# type_uuid      = "#b16286"
+# type_quoted    = "#a89984"
+# type_command   = "#d3869b"
+# type_secret    = "#fb4934"
+
+# [types.<tag>] — per-type verb allow-list/default override. <tag> is a
+# built-in type tag (url, file, diag, git, sha, ipv4, ipv6, uuid, quote,
+# cmd, secret) or a custom pattern's configured name. `copy-raw`/`json`
+# are always allowed for every type regardless of `actions`; `open`/
+# `edit`/`reveal` are always denied for `secret` regardless of config.
+# Verb names: copy-raw, copy-display, insert, insert-display, open,
+# edit, reveal, json.
+#
+# [types.url]
+# actions = ["open", "copy-raw"]   # drop insert for url matches
+# default = "copy-raw"             # Enter copies instead of opening
+
+# [actions.<tag>] — command templates for open/edit/reveal, run via a
+# shell. <tag> is a built-in type tag, a custom pattern name, or
+# "default" (fallback for any type not explicitly listed here).
+# Template variables: {editor} {file} {line} {url} {match} {raw}
+# {display} {type} {context}, plus numbered capture groups {0}..{N}
+# for custom patterns. When {line} resolves empty, one trailing
+# separator character (":", "+", or space) right before it in the
+# template is stripped too, so "hx {file}:{line}" degrades to
+# "hx src/main.rs" rather than "hx src/main.rs:".
+#
+# [actions.file]
+# edit = "hx {file}:{line}"
+#
+# [actions.default]
+# open = "open {raw}"
+
+# [limits] — per-verb caps on multi-target dispatch. Omit a key to keep
+# its built-in default (copy/json 100, insert/edit 5, open/reveal 10).
+# 0 disables that verb entirely, for every type.
+#
+# [limits]
+# copy = 100     # caps copy-raw/copy-display together
+# insert = 5     # caps insert/insert-display together
+# open = 10
+# edit = 5
+# reveal = 10
+# json = 100

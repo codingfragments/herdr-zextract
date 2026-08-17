@@ -65,9 +65,29 @@ fn run() -> Result<(), String> {
     let profile_name = std::env::var("ZEXTRACT_PROFILE").unwrap_or_else(|_| "open".to_string());
     let profile = config.resolve_profile(&profile_name);
 
-    let grab_profile = grab::resolve(profile.grab.as_deref().unwrap_or(""));
+    let grab_profile = config.resolve_grab_profile(profile.grab.as_deref().unwrap_or("quick"));
+    config.log(
+        config::LogLevel::Debug,
+        &format!(
+            "profile {profile_name:?}: grab source={:?} lines={:?} patterns={:?}",
+            grab_profile.source, grab_profile.lines, profile.patterns
+        ),
+    );
+    config.disabled.extend(grab_profile.disable.iter().cloned());
+
+    // Preview pane rendering itself is Phase 9 - resolved here anyway
+    // so `[ui].preview`/`[profiles.<name>].preview` are both exercised
+    // (and observable via log_level="debug") well before Phase 9 lands.
+    let preview_open = config.resolve_preview_open(&profile);
+    config.log(
+        config::LogLevel::Debug,
+        &format!(
+            "preview: open={preview_open} open_width={:?} closed_width={:?}",
+            config.ui.preview_open_width, config.ui.preview_closed_width
+        ),
+    );
     let captures = grab::capture(
-        grab_profile,
+        &grab_profile,
         &socket_path,
         &ctx.focused_pane_id,
         &ctx.tab_id,
@@ -113,15 +133,21 @@ fn run() -> Result<(), String> {
         })
         .unwrap_or_default();
 
-    let selection = picker::run(matches, &custom_tags, config_missing, &initial_query)
-        .map_err(|e| format!("picker failed: {e}"))?;
+    let selection = picker::run(
+        matches,
+        &custom_tags,
+        config_missing,
+        &config,
+        &initial_query,
+    )
+    .map_err(|e| format!("picker failed: {e}"))?;
     match selection {
         picker::PickerResult::Selected(matches, verb) => {
             let refs: Vec<&matcher::Match> = matches.iter().collect();
             // Insert always targets the pane the plugin was launched
             // from, regardless of which pane a multi-pane match came
             // from - ctx.focused_pane_id, not any per-match pane id.
-            match actions::execute_batch(verb, &refs, &ctx.focused_pane_id) {
+            match actions::execute_batch(verb, &refs, &ctx.focused_pane_id, &config) {
                 actions::Outcome::Done(msg) => println!("{msg}"),
                 actions::Outcome::Failed(msg) => println!("error: {msg}"),
             }

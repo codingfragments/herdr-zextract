@@ -24,11 +24,58 @@ from uses KDL, matching Zellij's own config format. This port uses TOML
 instead, matching Herdr's own config conventions (`config.toml`,
 `herdr-plugin.toml`).
 
-**Scope note:** the `patterns { }` block and `[profiles.<name>]` below
-are ported so far (PLANNING.md §11 Phases 5 and 7). The original's
-`ui`, `colors`, `limits`, `types`, and `actions` blocks — theming,
-per-verb caps, and action-template overrides — aren't built yet; this
-doc will grow as later phases add them.
+**Scope note:** every block below is ported as of PLANNING.md §11 Phase
+8 — `log_level`, `[grab_profiles.<name>]`, `patterns.command.flag_anchored`,
+`[ui]`/`[profiles.<name>].preview`, `[colors]`, and `[types]`/
+`[actions]`/`[limits]` all reached 100% parity with the original's
+`zextract.kdl` surface in that phase. Preview pane *rendering* itself
+is still Phase 9 — `[ui].preview` is parsed and resolved but has
+nothing to render against yet.
+
+---
+
+## `log_level` — stderr diagnostic verbosity
+
+```toml
+log_level = "info"   # default
+```
+
+One of `off`, `error`, `warn`, `info`, `debug`. Governs
+`herdr-zextract`-prefixed stderr diagnostics (visible via `herdr plugin
+log`) - not the picker's own user-facing result/error line, which
+always shows regardless (it's the only feedback a failed launch gets).
+`off` shows nothing; `debug` shows everything, including which grab
+profile and pattern restriction a launch resolved to.
+
+One inherent limitation: a config *parse error* is reported at the
+default level regardless of this setting, since the level itself lives
+in the same file that failed to parse.
+
+---
+
+## `[ui]` — preview pane sizing and default state
+
+```toml
+[ui]
+preview = "off"                # default
+preview_open_width = "90%"     # default
+preview_closed_width = "70%"   # default
+```
+
+| Key | Description |
+|---|---|
+| `preview` | Preview pane state at launch. `"off"` = closed (default), `"auto"` = closed (see note below), `"always"` = open. Overridden per keybind by `[profiles.<name>].preview` when set. |
+| `preview_open_width` | Popup width while the preview is open. Percent string or cell count. |
+| `preview_closed_width` | Popup width while the preview is closed. |
+
+**Note on `"auto"`:** the original remembers the previous session's
+open/closed state across launches. This port has no such persistence —
+each invocation is a fresh process with nothing to remember — so
+`"auto"` behaves identically to `"off"` here.
+
+The preview pane's actual *rendering* doesn't exist yet (see
+PLANNING.md §11 Phase 9); this block only adds the config surface that
+phase reads from.
 
 ---
 
@@ -60,6 +107,30 @@ these always run regardless of this setting) plus an entropy-based
 fallback that catches unknown high-entropy tokens. Set `entropy_filter
 = false` to disable the fallback pass and rely only on curated formats
 (fewer false positives, misses unknown secret formats).
+
+---
+
+## `[patterns.command]` — flag-anchored detection toggle
+
+```toml
+[patterns.command]
+flag_anchored = false   # default
+```
+
+`cmd` detection runs two strategies always (prompt-anchored, then
+exec-anchored against a known trigger word) plus a third, opt-in
+strategy tried only when neither of the first two matches a line: find
+the leftmost standalone `-x`/`-xyz`/`--long-flag` token, walk backward
+to the nearest boundary character (`][}{><:;|&(,'"`), then forward past
+whitespace to the command word. Catches commands with no recognized
+prompt and no trigger word (e.g. `[dry-run] jq -r '.foo' file.json`).
+
+Guards: the command word must start with a lowercase ASCII letter and
+be at least 2 characters — rejects `The --verbose flag` (uppercase) and
+single-letter noise. Off by default because it can still false-positive
+on ordinary prose containing flag-looking tokens (e.g. `"missing
+argument -v"`); use `#cmd`/`#!cmd` query filters to show or hide command
+matches in a session where the noise is too high.
 
 ---
 
@@ -138,6 +209,7 @@ profile name gets selected by a keybind.
 | `grab` | Scrollback-depth / scan-scope profile: `quick` (150 lines, current pane — default), `deep` (1500 lines), `viewport` (visible screen only), `full` (entire scrollback), `tab-scan` (every pane on the current tab, 150 lines each, last-focused pane first). Unrecognized values fall back to `quick`. |
 | `patterns` | Allowlist of type tags (built-in or custom) to extract at all for this profile, overriding `[patterns].disable` entirely. Omit for no restriction (the config's own `disable` list still applies). |
 | `type_filter` | Type tags to pre-fill the picker's query with as `#tag` filters — narrows what's shown, doesn't restrict what's extracted (unlike `patterns`). |
+| `preview` | Force the preview pane open/closed for this keybind specifically, overriding `[ui].preview`'s default. One of `on`, `off`, `always`, `never`. Omit to use the `[ui]` default. |
 
 **Built-in profiles:** `open`, `tab`, `url`, and `url-tab` have
 built-in Rust-side defaults matching the four actions
@@ -154,3 +226,225 @@ failing, so binding a `zextract-customN` action before configuring its
 profile is safe. Define `[profiles.customN]` here to give one an actual
 grab scope and/or pattern allowlist, then bind a key to the matching
 `zextract-customN` action.
+
+---
+
+## `[grab_profiles.<name>]` — grab profile definitions
+
+```toml
+[grab_profiles.deep]
+lines = 3000
+
+[grab_profiles.jira-deep]
+source = "scrollback"
+lines = 500
+disable = ["secret"]
+```
+
+`jira-deep` above is a wholly custom name — none of the built-in five
+(`quick`/`deep`/`viewport`/`full`/`tab-scan`) is named that. Defining a
+block under any new name is enough to make it a selectable grab
+profile; wire it up by pointing a `[profiles.<name>].grab` at it, e.g.
+
+```toml
+[profiles.custom0]
+grab = "jira-deep"
+```
+
+Commented out (deactivated) in `config.example.toml` by default —
+uncomment both blocks to use it.
+
+Don't confuse this with `[profiles.<name>]` above: that block only ever
+*selects* a grab profile by name (`grab = "deep"`); this block defines
+what a grab profile name actually *means*. `quick`/`deep`/`viewport`/
+`full`/`tab-scan` all have built-in Rust-side definitions, so grab
+scopes work with zero config here too — add a block only to override
+one, or to define a wholly new name for `[profiles.<name>]` to select.
+
+| Key | Description |
+|---|---|
+| `source` | `"scrollback"`, `"viewport"`, or `"tab"`. Unrecognized/absent falls back to `"scrollback"`. |
+| `lines` | Max lines to scan. `0` or absent means unbounded. |
+| `disable` | Type tags/custom pattern names to skip only while this profile is active — merged into the invocation's disable list, not a replacement for it. Ignored entirely if a keybind's `[profiles.<name>].patterns` allowlist is also set (allowlist mode overrides every disable source, global and per-profile alike). |
+
+**Built-in definitions:**
+
+| Name | `source` | `lines` |
+|---|---|---|
+| `quick` | scrollback | 150 |
+| `deep` | scrollback | 1500 |
+| `viewport` | viewport | unbounded |
+| `full` | scrollback | unbounded |
+| `tab-scan` | tab | 150 |
+
+Unlike the original plugin (where defining even one profile under its
+`grab { profiles { } }` block replaces *all four* built-in defaults at
+once), a block here overrides or adds by name only — built-ins for
+names you don't touch survive. Fields you omit within a block you do
+define fall back to that name's built-in value, if one exists (e.g.
+`[grab_profiles.deep]` with just `lines = 3000` keeps `deep`'s built-in
+`scrollback` source). An unrecognized name with no block at all falls
+back to `quick`, matching the original's "typos fall back to the first
+defined profile" behavior.
+
+---
+
+## `[colors]` — full UI palette override
+
+```toml
+[colors]
+cursor_bg = "#7aa2f7"   # Tokyo Night blue
+cursor_fg = "#1a1b26"   # Tokyo Night background
+```
+
+Every key is optional — omit the block entirely (or any individual
+key) to keep the built-in ANSI-palette default for that slot.
+
+### Color value format
+
+| Format | Example | Notes |
+|---|---|---|
+| ANSI name | `"dark_gray"` | `black`, `dark_gray`, `gray`, `white`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `light_red`, `light_green`, `light_yellow`, `light_blue`, `light_magenta`, `light_cyan` |
+| Hex | `"#rrggbb"` | Six-digit lowercase hex |
+| RGB | `"rgb(r,g,b)"` | Decimal 0–255 per channel |
+
+An unrecognized value falls back to that slot's built-in default
+rather than erroring.
+
+### UI chrome slots
+
+| Key | Default | Used for |
+|---|---|---|
+| `muted` | `"dark_gray"` | Gutters, hints, secondary text, empty-state messages |
+| `accent` | `"cyan"` | Selected-item `*` gutter |
+| `cursor_bg` | `"blue"` | List cursor row background |
+| `cursor_fg` | `"black"` | List cursor row foreground — must contrast `cursor_bg` |
+| `highlight` | `"yellow"` | Fuzzy-match character highlights, config-missing banner border, status messages |
+| `error` | `"light_red"` | Rejection/failure status messages (e.g. a refused batch action) |
+| `fallback_type` | `"gray"` | Color for a custom pattern with no dedicated `type_*` slot |
+
+### Type color slots
+
+Each slot controls the `[tag]` pill in the list.
+
+| Key | Default | Type tag |
+|---|---|---|
+| `type_url` | `"blue"` | `url` |
+| `type_file` | `"green"` | `file` |
+| `type_diag` | `"light_red"` | `diag` |
+| `type_git` | `"yellow"` | `git` |
+| `type_sha` | `"yellow"` | `sha` |
+| `type_ipv4` | `"cyan"` | `ipv4` |
+| `type_ipv6` | `"cyan"` | `ipv6` |
+| `type_uuid` | `"magenta"` | `uuid` |
+| `type_quoted` | `"gray"` | `quote` |
+| `type_command` | `"light_magenta"` | `cmd` |
+| `type_secret` | `"light_red"` | `secret` |
+
+### Theme presets
+
+Five complete presets — **Catppuccin Mocha**, **Catppuccin Macchiato**,
+**Catppuccin Latte** (light), **Tokyo Night**, and **Gruvbox Dark** —
+are included as commented blocks in
+[`config.example.toml`](../config.example.toml); uncomment one at a
+time. Not yet ported: preview-pane match-line highlighting doesn't
+exist yet (Phase 9), so `highlight`'s preview-related use from the
+original doesn't apply here yet either.
+
+---
+
+## `[types.<tag>]` — per-type verb allow-list and default-verb override
+
+```toml
+[types.url]
+actions = ["open", "copy-raw"]
+default = "copy-raw"
+```
+
+`<tag>` is a built-in type tag (see the list under `[patterns]` above)
+or a custom pattern's configured `name`.
+
+| Key | Description |
+|---|---|
+| `actions` | Verbs available for this type, replacing the built-in allow-list entirely. Unrecognized verb names are silently dropped. |
+| `default` | Verb fired by `Enter`. Falls back to the built-in default if unset, or if it names a verb not in the (possibly overridden) `actions` list — in that case the first allowed verb wins instead. |
+
+**Verb names** (as used in `actions`/`default`, and distinct from the
+picker's own key labels): `copy-raw`, `copy-display`, `insert`,
+`insert-display`, `open`, `edit`, `reveal`, `json`.
+
+**Hardcoded exceptions, preserved regardless of this block:**
+`copy-raw` and `json` are always allowed for every type; `open`,
+`edit`, and `reveal` are always denied for `secret`.
+
+**Interaction with `[limits]`:** a verb whose `[limits]` cap is set to
+`0` is dropped from every type's allow-list, even one that explicitly
+lists it here.
+
+---
+
+## `[actions.<tag>]` — command templates for open/edit/reveal
+
+```toml
+[actions.file]
+edit = "hx {file}:{line}"
+
+[actions.default]
+open = "open {raw}"
+```
+
+`<tag>` is a built-in type tag, a custom pattern's configured `name`,
+or the literal `"default"` — consulted for any type with no
+tag-specific override for that verb.
+
+| Key | Description |
+|---|---|
+| `open` | Command template run in place of the built-in `open`/`xdg-open` invocation. |
+| `edit` | Command template run in place of the built-in `$EDITOR [+line] file` invocation (also used per-file in a multi-target edit batch). |
+| `reveal` | Command template run in place of the built-in `open -R`/`xdg-open <parent>` invocation. |
+
+Each template is run through `sh -c` after variable substitution.
+
+### Template variables
+
+| Variable | Value |
+|---|---|
+| `{editor}` | `$EDITOR`, falling back to `vi` |
+| `{file}` | The match's `file` field, falling back to `raw` |
+| `{line}` | The match's `line` field, empty if absent |
+| `{url}` | The match's `url` field, falling back to `raw` |
+| `{match}` | The match's `match` field (custom patterns), falling back to `raw` |
+| `{raw}` | The match's raw value |
+| `{display}` | The match's display value |
+| `{type}` | The match's effective `#tag` |
+| `{context}` | The full source line the match came from |
+| `{0}`..`{N}` | Numbered capture groups, for custom patterns |
+
+Unknown `{name}` tokens are left literal. When `{line}` resolves
+empty, one trailing separator character (`:`, `+`, or a space)
+immediately preceding it in the template is stripped too, so
+`"hx {file}:{line}"` degrades to `"hx src/main.rs"` rather than
+`"hx src/main.rs:"`.
+
+---
+
+## `[limits]` — per-verb multi-target dispatch caps
+
+```toml
+[limits]
+insert = 1
+```
+
+| Key | Default | Caps |
+|---|---|---|
+| `copy` | 100 | `copy-raw` and `copy-display` batches together |
+| `insert` | 5 | `insert` and `insert-display` batches together |
+| `open` | 10 | `open` |
+| `edit` | 5 | `edit` |
+| `reveal` | 10 | `reveal` |
+| `json` | 100 | `json` |
+
+Omitting a key keeps its built-in default. Setting a key to `0`
+disables that verb entirely, for every type — the picker refuses it
+the same way it refuses a type-mismatched verb, rather than treating it
+as "cap exceeded."
