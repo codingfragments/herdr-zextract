@@ -128,3 +128,16 @@ herdr plugin link .        # from this repo's root
 herdr config check
 herdr server reload-config
 ```
+
+**Platform gap — no per-launch popup title:** the original plugin's
+`configuration.popupTitle` lets a keybind override the popup's title
+at launch time. Herdr has no equivalent — every `zextract-*` action
+above shares the one `[[panes]]` entry (`id = "zextract"`, `title =
+"zextract"`) via `--entrypoint zextract`, and a pane's title is fixed
+by its `[[panes]].title` at manifest-link time, not by the launching
+action's own `title` (that's only the label shown in `herdr plugin
+action list`) or by `ZEXTRACT_PROFILE`/`config.toml`. Getting a
+distinct popup title per profile means defining a second `[[panes]]`
+block with its own `id`/`title` and pointing a new action's
+`--entrypoint` at that id instead — not just adding `[[actions]]` as
+shown above.
