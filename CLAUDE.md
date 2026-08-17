@@ -10,7 +10,7 @@ repos, adapted for this port's binary-release model.
   - `bug/` — bug fixes
   - `feature/` — new features
   - `phase/` — larger milestone / multi-commit work (e.g. each item in
-    PLANNING.md §11 Milestones)
+    PLANNING.md §11 Implementation phases)
   - `release/<version>` — release prep (version bump + CHANGELOG)
 - If the type is unclear, ask before creating the branch.
 - Every branch lands via PR to `main` — no direct commits to `main`.
@@ -24,9 +24,9 @@ repos, adapted for this port's binary-release model.
   for "push" / "looks good".
 - End each phase with: what to test, how to trigger it, what works vs
   what's still a stub.
-- Current phase: **planning only** — no implementation branches until
-  PLANNING.md's open questions (§12) are resolved against a real Herdr
-  install.
+- Current phase: PLANNING.md's open questions (§12) are resolved —
+  implementation branches now follow the phase sequence in PLANNING.md
+  §11 Implementation phases, one `phase/` branch/PR per phase, in order.
 
 ## Release process
 
