@@ -242,6 +242,12 @@ Implemented in `.github/workflows/release.yml` and `ci.yml` (Phase 10):
 - Tag naming: `vMAJOR.MINOR.PATCH`, first stable tag once picker + matcher
   parity with the original is reached and manually verified against a
   real Herdr session on both a Mac and a Linux box.
+- Rolling `latest` tag: every release run also force-moves a `latest`
+  git tag to the newly-tagged commit and publishes/updates a `latest`
+  GitHub release with the same three binaries (`make_latest: false`, so
+  it never displaces the real semver tag's "Latest release" badge) -
+  lets `herdr plugin install <owner>/<repo> --ref latest` track newest
+  without pinning a version. Introduced after v0.1.1.
 
 ## 10. Repo layout (planned, once code starts)
 
