@@ -2,17 +2,30 @@ mod socket_client;
 
 use socket_client::SocketClient;
 
+/// Reads the previously-focused pane id from either launch path: a real
+/// plugin-pane invocation sets `HERDR_PLUGIN_CONTEXT_JSON.focused_pane_id`;
+/// a `[[keys.command]]` custom-command popup (used for manual testing ahead
+/// of Phase 6's real plugin keybind) sets `HERDR_ACTIVE_PANE_ID` directly.
+fn focused_pane_id() -> Result<String, String> {
+    if let Ok(context_json) = std::env::var("HERDR_PLUGIN_CONTEXT_JSON") {
+        let context: serde_json::Value = serde_json::from_str(&context_json)
+            .map_err(|e| format!("invalid context JSON: {e}"))?;
+        return context
+            .get("focused_pane_id")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+            .ok_or_else(|| {
+                "context JSON has no focused_pane_id (nothing was focused before this popup opened)"
+                    .to_string()
+            });
+    }
+    std::env::var("HERDR_ACTIVE_PANE_ID").map_err(|_| {
+        "neither HERDR_PLUGIN_CONTEXT_JSON nor HERDR_ACTIVE_PANE_ID is set".to_string()
+    })
+}
+
 fn run() -> Result<(), String> {
-    let context_json = std::env::var("HERDR_PLUGIN_CONTEXT_JSON")
-        .map_err(|_| "HERDR_PLUGIN_CONTEXT_JSON is not set".to_string())?;
-    let context: serde_json::Value =
-        serde_json::from_str(&context_json).map_err(|e| format!("invalid context JSON: {e}"))?;
-    let pane_id = context
-        .get("focused_pane_id")
-        .and_then(|v| v.as_str())
-        .ok_or(
-            "context JSON has no focused_pane_id (nothing was focused before this popup opened)",
-        )?;
+    let pane_id = focused_pane_id()?;
 
     let socket_path = std::env::var("HERDR_SOCKET_PATH")
         .map_err(|_| "HERDR_SOCKET_PATH is not set".to_string())?;
