@@ -294,7 +294,7 @@ runtime.
 
 **Out of scope:** matcher, picker UI, actions, config file, keybinding
 (`herdr plugin pane open` from the CLI is an acceptable trigger for this
-phase — real keybinding wiring is Phase 6).
+phase — real keybinding wiring is Phase 7).
 
 **Manual test plan:**
 1. `cargo build --release`.
@@ -546,31 +546,176 @@ separate location. Considered and rejected moving to a flat
 mechanism and risk colliding with Herdr's own `config.toml` or other
 plugins'.
 
-### Phase 6 — Manifest polish & keybinding
+### Gap analysis vs. the original (2026-08-17)
+
+Phases 1-5 shipped a working, config-driven picker, but a careful
+re-read of the original `zellij-zextract` source (`action.rs`,
+`main.rs`'s `State`/`render_footer`/`render_banner`,
+`doc/config-reference.md`, `doc/multi-pane-grab.md`, its README)
+surfaced real functional gaps beyond what each phase's own "out of
+scope" notes called out. Resolved via an interview with the user;
+Phases 6-9 below exist because of it. Two items were explicitly put on
+the **backburner** (not phases - implement ad hoc only if actually
+needed, not preemptively):
+- **Progress bar / incremental-extraction UI**: the original's
+  chunked extraction + spinner + `LineGauge` existed mainly for
+  Zellij's WASM per-frame render budget; our native process extracts
+  synchronously and it's fast even on large text. Multi-pane scanning
+  (Phase 7) could add up over many panes' `pane.read` round-trips, but
+  don't build feedback UI for a slowness that hasn't been observed -
+  revisit only if it's actually sluggish in practice.
+- **`mask_secrets`** (replace secret values with `••••` in the list):
+  cosmetic only - the secret is already sitting in plaintext in the
+  scrollback it was extracted from, so masking it in the picker adds
+  no real security. Not worth building.
+
+### Phase 6 — Action menu, mode split, multi-select, banners
+
+**Prompt:** Close the "I can't see what I can do with a match" gap.
+Port the original's `render_footer` (dynamic verb-key hints for the
+highlighted match's type) and the Input/List mode split (`Tab`
+toggles; in List mode bare letters `y`/`i`/`o`/`e`/`r`/`Y`/`I`/`p`/`J`/
+`Space` fire verbs directly instead of editing the query - the
+Ctrl-modifier bindings from Phase 4 keep working as universal
+shortcuts in both modes, matching the original's "Ctrl-Y works from
+either mode" pattern). Add multi-select (`Space` toggles the
+highlighted row; `Ctrl-A`/`Ctrl-D` select-all-visible/clear) with
+batch dispatch (copy joins with `\n`, insert joins with a space, edit
+chains with `&&`, open fires N separate invocations), gated by
+hardcoded per-verb caps matching the original's defaults (copy 100,
+insert 5, open 10, edit 5, json 100 - no `reveal` cap needed until
+Phase 8 makes these real config). Add a dedicated banner row (replacing
+the cramped inline-message hack from Phase 5) for the config-missing/
+parse-error/warning states, with `Ctrl-X` to dismiss. Add the `reveal`
+verb (open Finder/file-manager at the file - macOS `open -R`, check
+what's idiomatic on Linux) and wire `Y`/`I` (CopyDisplay/InsertDisplay)
+now that List mode exists to put them on.
+
+**Scope:** `picker/mod.rs` (mode enum, footer/banner rendering,
+multi-select state, batch dispatch), `actions.rs` (`reveal` verb, cap
+table).
+
+**Out of scope:** making the caps configurable (`limits{}` - Phase 8),
+`colors{}`-driven banner/footer styling (Phase 8 also owns theming).
+
+**Manual test plan:**
+1. Highlight matches of several different types; confirm the footer
+   shows that type's actual allowed verbs, not a static hint.
+2. Press `Tab`, confirm typing no longer edits the query and bare
+   letters fire verbs (`y` copies, `o` opens a URL match, etc.);
+   `Tab` back to Input mode and confirm typing works again.
+3. `Space` two rows, fire a batch copy, confirm the clipboard holds
+   both values newline-joined. Try exceeding a verb's cap and confirm
+   it's refused with a message, not a partial/silent fire.
+4. Trigger the config-missing state and confirm the banner (not the
+   input bar) shows it; `Ctrl-W` writes the config, `Ctrl-X` dismisses
+   a banner without acting on it.
+5. `r` on a file match opens it in Finder/file-manager; `Y`/`I` on a
+   `quote` match copy/insert the unquoted `display` value.
+
+### Phase 7 — Manifest polish & keybinding
 
 **Prompt:** Finalize `herdr-plugin.toml` for both install paths in §8
 (Option A's `[[build]]`-driven install, Option B's `cargo install`
-minimal manifest), and wire a real Herdr keybind (`[[actions]]` in the
-manifest, per the schema found in Phase 1's investigation) so the
-plugin launches via keypress against whatever pane is focused, not just
-via `herdr plugin pane open` from the CLI.
+minimal manifest). Port `grab{}` config (named scrollback-depth
+profiles - `quick`/`deep`/`viewport`/`full`/`tab-scan`, runtime cycling
+via `g`/`Alt-g`) and multi-pane tab-wide scanning (`source = "tab"`:
+every non-floating, non-plugin pane on the active tab, last-focused
+pane's matches first, pane-title-prefixed rows when more than one pane
+contributes, insert always targets the pane the plugin was launched
+from regardless of which pane a match came from - see
+`doc/multi-pane-grab.md`'s design-decisions table, ported verbatim).
+Wire real Herdr keybinds (`[[actions]]` in the manifest, per the schema
+found in Phase 1's investigation) with **per-keybind configuration
+overrides** - the manifest-level equivalent of the original's
+`LaunchOrFocusPlugin` `configuration` map (`type` pre-fill filter,
+`grab` profile override, `patterns` allowlist, `preview` state,
+`popupTitle`) - since this is the actual mechanism the user's
+`prefix-s`/`S`/`u`/`U` keybind setup (single-pane vs. cross-tab grab,
+URL/IP-only quick filter) depends on. One keybind with no
+per-bind configurability isn't the feature being asked for.
 
-**Scope:** final manifest shape, README's "Option A/B" install
-instructions validated against both paths.
+**Scope:** `grab.rs` or similar (profile config + multi-pane
+extraction), manifest `[[actions]]` overrides, README's "Option A/B"
+install instructions validated against both paths.
 
-**Out of scope:** CI/release automation (Phase 7).
+**Out of scope:** CI/release automation (Phase 10), `colors{}`/`ui{}`/
+`types{}`/`actions{}` config (Phase 8), preview pane (Phase 9).
+
+**Process rule:** any edit to the user's live
+`~/.config/herdr/config.toml` (adding/changing `[[keys.command]]` or
+plugin keybind entries) is proposed as an explicit diff and requires
+the user's active approval before being applied - never auto-edited
+silently, regardless of how routine the change looks.
 
 **Manual test plan:**
-1. `herdr plugin link .`, bind a key to the plugin action in Herdr
-   config, reload config.
-2. From an arbitrary pane with scrollback, press the bound key.
-3. Confirm the popup opens targeting that pane (not whatever was
-   focused when the plugin was linked).
-4. Repeat via `herdr plugin install <owner>/<repo>` against a pushed
-   branch, confirming the `[[build]]` step actually compiles before
-   registration (per §8's "not automatic build detection" note).
+1. `herdr plugin link .`, bind at least two keys with different
+   `configuration` overrides (e.g. one plain, one `type="url ipv4"`),
+   reload config - confirm each edit to `config.toml` was proposed and
+   approved before being applied, not made automatically.
+2. From an arbitrary pane with scrollback, press each bound key;
+   confirm the popup opens targeting that pane and honors that
+   keybind's specific override (filter pre-fill, grab scope).
+3. Bind a `tab-scan`-grab key on a tab with 3+ panes; confirm matches
+   from every non-floating pane appear, title-prefixed, last-focused
+   pane's matches first, and that Insert lands in the launch pane
+   regardless of which pane's match was picked.
+4. Repeat install via `herdr plugin install <owner>/<repo>` against a
+   pushed branch, confirming the `[[build]]` step actually compiles
+   before registration (per §8's "not automatic build detection" note).
 
-### Phase 7 — CI & first release
+### Phase 8 — Theming & action templates
+
+**Prompt:** Port the remaining `patterns`-adjacent config blocks:
+`colors{}` (full theme override, matching `ColorsConfig`'s slots),
+`ui{}` (preview pane sizing/state - the toggle itself is Phase 9, this
+is just its config), `types{}` (per-type verb allow-list/default-verb
+override, replacing Phase 4's static tables where a user's config
+disagrees), `actions{}` (command templates for open/edit/reveal, e.g.
+`hx {file}:{line}` or VSCode's `code -g {file}:{line}` instead of the
+hardcoded `$EDITOR +{line} {file}`), and upgrade Phase 6's hardcoded
+multi-select caps to real `limits{}` config.
+
+**Scope:** `config.rs` schema growth, `config.example.toml` +
+`doc/config-reference.md` updated in the same commit (per the standing
+rule - see memory), `actions.rs`'s template substitution
+(`{editor}`/`{file}`/`{line}`/`{url}`/`{match}`/`{0..N}`).
+
+**Out of scope:** preview pane rendering itself (Phase 9) -
+`ui.preview_*` keys are parsed here but have nothing to act on yet.
+
+**Manual test plan:**
+1. Set a custom `colors{}` palette; confirm the picker's tag colors
+   and highlight color actually change.
+2. Override `types.url.actions` to drop `open`; confirm `o`/`Ctrl-O` on
+   a URL match is now refused.
+3. Set `actions.file.edit.command` to a custom template; confirm
+   `edit` invokes that exact command instead of the hardcoded default.
+4. Set `limits.insert = 1`; confirm a 2-row multi-select insert is
+   refused instead of firing.
+
+### Phase 9 — Preview pane
+
+**Prompt:** Port the preview pane: toggled via `p` (List mode) or
+`Ctrl-P` (either mode), shows ±3 lines of context around the current
+match's location in the captured scrollback text, sized per Phase 8's
+`ui.preview_open_width`/`preview_closed_width`.
+
+**Scope:** `picker/mod.rs` split-layout rendering, `ui.preview`
+launch-state handling (`off`/`auto`/`always`).
+
+**Out of scope:** multi-pane preview context (which pane's captured
+text to show when a tab-scan match is highlighted) beyond whatever
+falls out naturally from Phase 7's per-match pane tracking.
+
+**Manual test plan:**
+1. `p`/`Ctrl-P` toggles the preview split open/closed.
+2. Navigating the list updates the preview to center on the
+   highlighted match's line.
+3. Confirm the preview pane's width matches
+   `ui.preview_open_width`/`preview_closed_width` from config.
+
+### Phase 10 — CI & first release
 
 **Prompt:** Write `.github/workflows/ci.yml` (`cargo fmt --check`,
 `cargo clippy -- -D warnings`, `cargo test` on macOS + Linux runners)
@@ -595,7 +740,7 @@ box.
 4. On a clean machine per target triple (or at least one Mac + one
    Linux box), download the release asset and confirm the binary runs.
 
-### Phase 8 — Docs pass
+### Phase 11 — Docs pass
 
 **Prompt:** Update `README.md`'s install section from "planned" to the
 real, tested instructions now that `v0.1.0` exists, and port/update
