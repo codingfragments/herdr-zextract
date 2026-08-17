@@ -429,6 +429,46 @@ matching match type, and verify the concrete effect:
 5. **export** — the exported JSON file/stdout contains the expected
    match objects (type, text, line if applicable).
 
+**Done (verified 2026-08-17):** ported `action.rs`'s allow-list/default
+tables and dispatch logic into `actions.rs`. Enter fires the type's
+default verb; `Ctrl-y`/`Ctrl-i`/`Ctrl-o`/`Ctrl-e`/`Ctrl-j` fire
+copy/insert/open/edit/export explicitly (only when allowed for that
+match's type — otherwise a silent no-op, picker stays open). Verified
+against the doc, not just the doc's prose: `doc/types.md` claims `file`
+defaults to `edit`, but the actual `static_default_verb` code puts it
+in the `Insert` bucket with everything except `Url`/`Diagnostic` —
+ported the code's behavior.
+
+One deliberate departure from the original: its `edit` verb couldn't
+spawn an interactive `$EDITOR` (no real TTY in a WASM plugin), so it
+typed the editor command into the source pane for the user to run
+themselves. Herdr plugins are native processes with a real PTY, so
+`edit` here spawns `$EDITOR` directly — a genuine capability upgrade.
+
+Two bugs found and fixed via manual testing:
+- **Stale socket reuse**: `insert` was written to reuse the `pane.read`
+  connection opened at process start, but by the time a human types a
+  filter and picks a match, that connection can go stale server-side
+  ("Broken pipe"). Fixed by opening a fresh connection right at insert
+  time instead of holding one open across the interactive session.
+- **Diagnostic regex ate leading slashes**: ported verbatim from the
+  original, `diagnostic.rs`'s colon-form regex anchored on `\b`, which
+  can't match immediately before a bare `/` (both sides non-word) — so
+  `/tmp/foo.rs:2:1` matched as `tmp/foo.rs:2:1`, silently dropping the
+  leading slash and breaking `edit` against absolute paths. Fixed by
+  dropping the `\b` and checking the preceding byte in code instead,
+  the same way `file.rs` already does it.
+
+Tested each action against real effects: `open` actually launched the
+browser; `insert` landed the exact text on the real *source* pane's
+prompt (verified with two distinct panes — binary running in one,
+scrollback/insert-target in another — since a popup can't be both);
+`copy` verified via `pbpaste`; `export` produced valid JSON with all
+expected fields; `edit` verified via a fake `$EDITOR` script logging
+its argv (`+<line> <file>`); and the secret hardcoded-deny verified by
+confirming `Ctrl-o` on a secret is silently ignored (no browser launch,
+no crash).
+
 ### Phase 5 — User config & custom patterns
 
 **Prompt:** Port `doc/config-reference.md`'s config schema: a config

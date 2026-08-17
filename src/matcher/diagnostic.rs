@@ -18,9 +18,24 @@ fn colon_form_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
         // Path with at least one slash OR a `.ext` filename, then :line:col.
-        Regex::new(r"\b([~]?[\w.\-/]*[/.][\w.\-]+):(\d+):(\d+)\b")
+        // No leading `\b`: it can't anchor immediately before a bare `/`
+        // (both sides non-word), which silently ate the leading slash off
+        // absolute paths (`/tmp/foo.rs:2:1` matched as `tmp/foo.rs:2:1`) -
+        // found while testing Phase 4's edit action against a real file.
+        // `ok_preceding_byte` below does the boundary check instead, the
+        // same way `file.rs` already does.
+        Regex::new(r"([~]?[\w.\-/]*[/.][\w.\-]+):(\d+):(\d+)\b")
             .expect("diagnostic colon-form regex compiles")
     })
+}
+
+fn ok_preceding_byte(b: Option<u8>) -> bool {
+    match b {
+        None => true, // start of line
+        Some(c) if c.is_ascii_whitespace() => true,
+        Some(b'(' | b'[' | b'{' | b'<' | b'"' | b'\'' | b'`' | b'=' | b',' | b';' | b':') => true,
+        _ => false,
+    }
 }
 
 fn python_traceback_regex() -> &'static Regex {
@@ -39,6 +54,14 @@ pub fn extract(text: &str) -> Vec<Match> {
     for line in text.lines() {
         for caps in colon_re.captures_iter(line) {
             let full = caps.get(0).unwrap();
+            let prev = if full.start() == 0 {
+                None
+            } else {
+                line.as_bytes().get(full.start() - 1).copied()
+            };
+            if !ok_preceding_byte(prev) {
+                continue;
+            }
             let file = caps.get(1).unwrap().as_str();
             let line_no = caps.get(2).unwrap().as_str();
             let col_no = caps.get(3).unwrap().as_str();
@@ -131,5 +154,16 @@ mod tests {
         assert_eq!(m[0].fields["file"], "/usr/lib/python3/foo.py");
         assert_eq!(m[0].fields["line"], "42");
         assert_eq!(m[0].fields["col"], "");
+    }
+
+    #[test]
+    fn absolute_path_keeps_leading_slash() {
+        // Regression: \b can't anchor immediately before a bare `/`
+        // (both sides non-word), which used to eat the leading slash
+        // off absolute paths.
+        let m = extract("see /tmp/zextract-edit-test.txt:2:1 for the bug");
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0].raw, "/tmp/zextract-edit-test.txt:2:1");
+        assert_eq!(m[0].fields["file"], "/tmp/zextract-edit-test.txt");
     }
 }
