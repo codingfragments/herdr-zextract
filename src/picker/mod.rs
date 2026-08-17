@@ -104,11 +104,16 @@ struct State {
 }
 
 impl State {
-    fn new(matches: Vec<Match>, custom_tags: Vec<String>, config_missing: bool) -> Self {
+    fn new(
+        matches: Vec<Match>,
+        custom_tags: Vec<String>,
+        config_missing: bool,
+        initial_query: &str,
+    ) -> Self {
         let mut state = Self {
             matches,
             custom_tags,
-            query: String::new(),
+            query: initial_query.to_string(),
             parsed_query: ParsedQuery::default(),
             fuzzy: FuzzyEngine::new(),
             filtered: Vec::new(),
@@ -267,12 +272,15 @@ pub enum PickerResult {
 /// `custom_tags` are the configured names of any custom patterns, so
 /// they resolve as `#name` filter tokens alongside the built-in types.
 /// `config_missing` shows the `Ctrl-W` "write starter config" hint.
+/// `initial_query` pre-fills the filter (e.g. `"#url"` for a
+/// per-keybind URL-only picker).
 pub fn run(
     matches: Vec<Match>,
     custom_tags: &[String],
     config_missing: bool,
+    initial_query: &str,
 ) -> io::Result<PickerResult> {
-    let mut state = State::new(matches, custom_tags.to_vec(), config_missing);
+    let mut state = State::new(matches, custom_tags.to_vec(), config_missing, initial_query);
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -561,6 +569,16 @@ fn render_list(frame: &mut Frame, area: Rect, state: &mut State) {
         return;
     }
 
+    // Pane-title prefix only when more than one pane actually
+    // contributed matches (tab-scan grab) - omitted entirely in
+    // single-pane mode, matching the original's rule.
+    let distinct_panes: HashSet<&str> = state
+        .matches
+        .iter()
+        .filter_map(|m| m.source_pane_title())
+        .collect();
+    let show_pane_prefix = distinct_panes.len() > 1;
+
     let items: Vec<ListItem> = state
         .filtered
         .iter()
@@ -577,18 +595,30 @@ fn render_list(frame: &mut Frame, area: Rect, state: &mut State) {
             } else {
                 Span::raw("  ")
             };
+            let pane_span = show_pane_prefix.then(|| {
+                let title = truncate_display(m.source_pane_title().unwrap_or("?"), 15, false);
+                Span::styled(
+                    format!("[{title}]  "),
+                    Style::default().fg(MUTED).add_modifier(Modifier::DIM),
+                )
+            });
+            let pane_overhead = pane_span.as_ref().map_or(0, |s| s.content.chars().count());
             let tag_span = Span::styled(
                 format!("[{}]  ", m.effective_tag()),
                 Style::default().fg(color_for_type(m.ty)),
             );
-            let tag_overhead = m.effective_tag().chars().count() + 8; // gutter(2) + "[tag]  "
+            let tag_overhead = m.effective_tag().chars().count() + 8 + pane_overhead; // gutter(2) + "[tag]  "
             let avail = (area.width as usize).saturating_sub(tag_overhead);
             let use_middle = matches!(
                 m.ty,
                 MatchType::Url | MatchType::File | MatchType::Diagnostic | MatchType::Git
             );
             let display = truncate_display(&m.display, avail, use_middle);
-            let mut spans = vec![gutter, tag_span];
+            let mut spans = vec![gutter];
+            if let Some(ps) = pane_span {
+                spans.push(ps);
+            }
+            spans.push(tag_span);
             spans.extend(highlight_spans(&display, &s.indices, HIGHLIGHT));
             ListItem::new(Line::from(spans))
         })

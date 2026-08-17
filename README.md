@@ -39,6 +39,21 @@ as `config.toml`. Or launch the plugin with no config and press
 
 Full schema: [`doc/config-reference.md`](doc/config-reference.md).
 
+## Keybinding
+
+The plugin ships fourteen ready-to-bind actions (four with built-in
+defaults — current-pane vs. whole-tab grab, all-types vs. URL/IP-only —
+plus ten free `customN` slots), bound via `[[keys.command]]` entries
+with `type = "plugin_action"` in your own
+`~/.config/herdr/config.toml` — Herdr owns all keybindings, the plugin
+never binds its own keys. Each action just names a *profile*; the
+profile's actual grab scope and pattern filter live in your own
+`config.toml` under `[profiles.<name>]` (see Configuration above), not
+in the plugin's packaging. Full binding reference, including the
+`customN` slots and how to add an eleventh action:
+[`doc/keybinding.md`](doc/keybinding.md). The one env var involved:
+[`doc/env-vars.md`](doc/env-vars.md).
+
 ## Build
 
 A native Rust binary — no WASM target involved.

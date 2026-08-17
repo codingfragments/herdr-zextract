@@ -24,11 +24,11 @@ from uses KDL, matching Zellij's own config format. This port uses TOML
 instead, matching Herdr's own config conventions (`config.toml`,
 `herdr-plugin.toml`).
 
-**Scope note:** only the `patterns { }` block described below is
-ported so far (PLANNING.md §11 Phase 5). The original's `ui`, `colors`,
-`grab`, `limits`, `types`, and `actions` blocks — theming, scrollback
-depth profiles, per-verb caps, and action-template overrides — aren't
-built yet; this doc will grow as later phases add them.
+**Scope note:** the `patterns { }` block and `[profiles.<name>]` below
+are ported so far (PLANNING.md §11 Phases 5 and 7). The original's
+`ui`, `colors`, `limits`, `types`, and `actions` blocks — theming,
+per-verb caps, and action-template overrides — aren't built yet; this
+doc will grow as later phases add them.
 
 ---
 
@@ -113,3 +113,44 @@ match whose `raw`/`display` is
 `https://jira.example.com/browse/PROJ-123` — type-aware actions (open,
 copy, insert) all operate on that expanded URL, not the literal
 `PROJ-123` text.
+
+---
+
+## `[profiles.<name>]` — per-keybind grab scope, pattern allowlist, query pre-fill
+
+```toml
+[profiles.tab]
+grab = "tab-scan"
+
+[profiles.url]
+patterns = ["url", "ipv4", "ipv6"]
+```
+
+Every keybind's launcher action (in `herdr-plugin.toml`) sets
+`ZEXTRACT_PROFILE=<name>` — that name is looked up here at launch. This
+is the layer meant for you to tune per keybind; `herdr-plugin.toml`
+itself only ever names a profile, never carries the grab/pattern
+values directly. See [`doc/keybinding.md`](keybinding.md) for how a
+profile name gets selected by a keybind.
+
+| Key | Description |
+|---|---|
+| `grab` | Scrollback-depth / scan-scope profile: `quick` (150 lines, current pane — default), `deep` (1500 lines), `viewport` (visible screen only), `full` (entire scrollback), `tab-scan` (every pane on the current tab, 150 lines each, last-focused pane first). Unrecognized values fall back to `quick`. |
+| `patterns` | Allowlist of type tags (built-in or custom) to extract at all for this profile, overriding `[patterns].disable` entirely. Omit for no restriction (the config's own `disable` list still applies). |
+| `type_filter` | Type tags to pre-fill the picker's query with as `#tag` filters — narrows what's shown, doesn't restrict what's extracted (unlike `patterns`). |
+
+**Built-in profiles:** `open`, `tab`, `url`, and `url-tab` have
+built-in Rust-side defaults matching the four actions
+`herdr-plugin.toml` ships (see the table in
+[`doc/keybinding.md`](keybinding.md#shipped-actions)), so those four
+keybinds work with no config file at all. Defining `[profiles.open]`
+(etc.) here replaces that built-in entirely — it doesn't merge with
+it, so restate every key you want, not just the one you're changing.
+
+**Custom profiles:** `herdr-plugin.toml` also ships ten unbound slots,
+`custom0` through `custom9`, with no built-in default — undefined ones
+degrade to plain defaults (`quick` grab, no restriction) rather than
+failing, so binding a `zextract-customN` action before configuring its
+profile is safe. Define `[profiles.customN]` here to give one an actual
+grab scope and/or pattern allowlist, then bind a key to the matching
+`zextract-customN` action.

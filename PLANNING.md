@@ -702,38 +702,104 @@ silently, regardless of how routine the change looks.
    from every non-floating pane appear, title-prefixed, last-focused
    pane's matches first, and that Insert lands in the launch pane
    regardless of which pane's match was picked.
-4. Repeat install via `herdr plugin install <owner>/<repo>` against a
-   pushed branch, confirming the `[[build]]` step actually compiles
-   before registration (per §8's "not automatic build detection" note).
 
-### Phase 8 — Theming & action templates
+(`herdr plugin install <owner>/<repo>` against a pushed branch moved to
+Phase 10's manual test plan - that's the phase that actually needs a
+tagged/pushed release to install against.)
 
-**Prompt:** Port the remaining `patterns`-adjacent config blocks:
-`colors{}` (full theme override, matching `ColorsConfig`'s slots),
-`ui{}` (preview pane sizing/state - the toggle itself is Phase 9, this
-is just its config), `types{}` (per-type verb allow-list/default-verb
-override, replacing Phase 4's static tables where a user's config
-disagrees), `actions{}` (command templates for open/edit/reveal, e.g.
-`hx {file}:{line}` or VSCode's `code -g {file}:{line}` instead of the
-hardcoded `$EDITOR +{line} {file}`), and upgrade Phase 6's hardcoded
-multi-select caps to real `limits{}` config.
+### Phase 8 — 100% config parity (grab profiles, theming, per-type/action overrides)
 
-**Scope:** `config.rs` schema growth, `config.example.toml` +
+**Prompt:** Close every remaining gap between this port's `config.toml`
+and the original's `zextract.kdl`, verified directly against a fresh
+re-read of the original's `doc/config-reference.md` and
+`doc/patterns.md` (pulled from `github.com/codingfragments/
+zellij-zextract` during Phase 7's follow-up on 2026-08-17, not from
+memory - the original has evolved since the Phase 6 gap analysis):
+
+- **`log_level`** top-level scalar (`off`/`error`/`warn`/`info`/`debug`),
+  governing stderr diagnostics - currently config parse errors always
+  print via a bare `eprintln!` regardless of any setting.
+- **`[grab_profiles.<name>]`** - user-definable/overridable named
+  scrollback-depth profiles (`source` = `scrollback`/`viewport`/`tab`,
+  `lines`, `disable` merged into the disable list *only when this
+  profile is active*), replacing `grab.rs`'s hardcoded `PROFILES` const
+  as the sole source of profile definitions. Deliberate divergence from
+  the original: the original replaces *all four* built-in defaults the
+  instant `profiles{}` is present at all ("users who define even one
+  profile must list all the profiles they want"); this port instead
+  overrides/adds by name only, consistent with how `[profiles.<name>]`
+  (Phase 7) already behaves - built-ins for names the user doesn't
+  touch survive. `grab::resolve` becomes a `Config` method
+  (`resolve_grab_profile`) instead of a pure static lookup.
+- **`patterns.command.flag_anchored`** - the original's third
+  command-detection strategy (walk back from a `-x`/`--long-flag`
+  token to the nearest boundary character), off by default. Not ported
+  at all yet - port into `matcher/command.rs`, gated by this key.
+- **`[profiles.<name>]` gains a `preview` field**
+  (`"on"`/`"off"`/`"always"`/`"never"`) - the original's per-keybind
+  `configuration.preview` override, layered on top of this phase's
+  `[ui].preview` default. Explicit requirement: preview's default
+  state must be configurable through the profile config, not
+  hardcoded into the binary or the manifest.
+- **`[ui]` block**: `preview` (`"off"`/`"auto"`/`"always"` default
+  state - parsed here, consumed by Phase 9's rendering),
+  `preview_open_width`/`preview_closed_width`. **`mask_secrets` stays
+  excluded** - already decided against on the backburner list above;
+  do not re-add it just for parity's sake.
+- **`[colors]` block**: full theme override matching every slot in the
+  original's table (`muted`/`accent`/`cursor_bg`/`cursor_fg`/
+  `highlight`/`error`/`fallback_type` + one `type_*` slot per built-in
+  type tag), accepting ANSI name / `#hex` / `rgb(r,g,b)` - wired into
+  the picker's actual rendering, not just parsed-and-ignored.
+- **`[types.<tag>]` block**: per-type `actions` (verb allow-list,
+  replacing Phase 4's static tables) and `default` (Enter verb), with
+  the original's hardcoded exceptions preserved (`copy-raw`/`json`
+  always allowed for every type; `open`/`edit`/`reveal` always denied
+  for `secret` regardless of config).
+- **`[actions.<tag>]` block**: command templates for `open`/`edit`/
+  `reveal` with the original's full template variable set (`{editor}`
+  `{file}` `{line}` `{url}` `{match}` `{raw}` `{display}` `{type}`
+  `{context}` `{0..N}`), including the `{line}`-empty separator-
+  stripping behavior (`:`/`+`/` ` stripped when `{line}` resolves
+  empty, so `"hx {file}:{line}"` degrades to `"hx src/main.rs"` rather
+  than `"hx src/main.rs:"`).
+- Upgrade Phase 6's hardcoded per-verb dispatch caps to real
+  `[limits]` config (`copy`/`insert`/`open`/`edit`/`reveal`/`json`, `0`
+  disables a verb entirely).
+
+**Scope:** `config.rs` schema growth (the largest single-phase growth
+in the port), `grab.rs` reworked to consult `Config` instead of a
+static table, `matcher/command.rs`'s flag-anchored strategy,
+`actions.rs`'s template substitution + config-driven allow-lists/caps,
+`picker/mod.rs`'s color application, `config.example.toml` +
 `doc/config-reference.md` updated in the same commit (per the standing
-rule - see memory), `actions.rs`'s template substitution
-(`{editor}`/`{file}`/`{line}`/`{url}`/`{match}`/`{0..N}`).
+rule - see memory).
 
-**Out of scope:** preview pane rendering itself (Phase 9) -
-`ui.preview_*` keys are parsed here but have nothing to act on yet.
+**Out of scope:** preview pane *rendering* itself (Phase 9 - this
+phase only adds the config surface Phase 9 reads from). The original's
+per-keybind `popupTitle` override has no discovered Herdr equivalent -
+Herdr's popup title comes from the static `[[panes]].title` in
+`herdr-plugin.toml`, not anything a launch-time env var can override;
+document this as a platform gap rather than chasing it as a
+deliverable.
 
 **Manual test plan:**
-1. Set a custom `colors{}` palette; confirm the picker's tag colors
+1. Define `[grab_profiles.deep]` with a different `lines` value than
+   the built-in; confirm a keybind using it captures that many lines
+   instead of the hardcoded 1500. Define a wholly new profile name and
+   confirm a `[profiles.<name>]` referencing it by `grab` works without
+   touching `grab.rs`.
+2. Enable `patterns.command.flag_anchored`; confirm a flag-anchored
+   command line (no prompt marker, no known trigger word) now matches.
+3. Set `[profiles.url].preview = "always"`; confirm that keybind opens
+   with the preview pane already open regardless of `[ui].preview`.
+4. Set a custom `[colors]` palette; confirm the picker's tag colors
    and highlight color actually change.
-2. Override `types.url.actions` to drop `open`; confirm `o`/`Ctrl-O` on
-   a URL match is now refused.
-3. Set `actions.file.edit.command` to a custom template; confirm
-   `edit` invokes that exact command instead of the hardcoded default.
-4. Set `limits.insert = 1`; confirm a 2-row multi-select insert is
+5. Override `[types.url].actions` to drop `open`; confirm `o`/`Ctrl-O`
+   on a URL match is now refused.
+6. Set `[actions.file].edit` to a custom template; confirm `edit`
+   invokes that exact command instead of the hardcoded default.
+7. Set `[limits].insert = 1`; confirm a 2-row multi-select insert is
    refused instead of firing.
 
 ### Phase 9 — Preview pane
@@ -743,8 +809,10 @@ rule - see memory), `actions.rs`'s template substitution
 match's location in the captured scrollback text, sized per Phase 8's
 `ui.preview_open_width`/`preview_closed_width`.
 
-**Scope:** `picker/mod.rs` split-layout rendering, `ui.preview`
-launch-state handling (`off`/`auto`/`always`).
+**Scope:** `picker/mod.rs` split-layout rendering, launch-state
+handling for `[ui].preview` (`off`/`auto`/`always`) overridden per
+keybind by Phase 8's `[profiles.<name>].preview`
+(`on`/`off`/`always`/`never`) when set.
 
 **Out of scope:** multi-pane preview context (which pane's captured
 text to show when a tab-scan match is highlighted) beyond whatever
@@ -781,6 +849,11 @@ box.
    + `.sha256` files, and attaches them to the GitHub release.
 4. On a clean machine per target triple (or at least one Mac + one
    Linux box), download the release asset and confirm the binary runs.
+5. Install via `herdr plugin install <owner>/<repo>` against the
+   pushed/tagged branch, confirming the `[[build]]` step actually
+   compiles before registration (per §8's "not automatic build
+   detection" note) - moved here from Phase 7 since this needs a real
+   release to install against.
 
 ### Phase 11 — Docs pass
 

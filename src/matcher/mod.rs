@@ -53,6 +53,13 @@ impl Match {
             .map(String::as_str)
             .unwrap_or_else(|| self.ty.tag())
     }
+
+    /// Set by `main.rs` in multi-pane (`tab-scan`) mode: which pane
+    /// this match came from, for the `[title]  ` list row prefix.
+    /// `None` in single-pane mode.
+    pub fn source_pane_title(&self) -> Option<&str> {
+        self.fields.get("__pane_title").map(String::as_str)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -390,9 +397,8 @@ mod fixture_tests {
 
     fn extract_custom_only(text: &str, patterns: &[crate::config::CustomPattern]) -> Vec<Match> {
         let config = crate::config::Config {
-            disabled: HashSet::new(),
-            secret_entropy_filter: true,
             custom: patterns.to_vec(),
+            ..crate::config::Config::default()
         };
         // Skip all built-ins - these fixtures are about custom-pattern
         // extraction specifically, and their scrollback also trips
