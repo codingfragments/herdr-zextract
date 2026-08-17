@@ -72,17 +72,22 @@ flag_anchored = false
 #
 # [profiles.url]
 # patterns = ["url", "ipv4", "ipv6"]
+# preview = "on"    # url/url-tab default to the preview already open -
+#                   # matches are short, so the context is cheap to show
 #
 # [profiles.url-tab]
 # grab = "tab-scan"
 # patterns = ["url", "ipv4", "ipv6"]
+# preview = "on"
 #
 # `preview` forces the preview pane open/closed for one specific
 # keybind, overriding [ui].preview's default. One of: on, off, always,
-# never. Add it to any [profiles.*] block above, e.g.:
+# never. Add it to any [profiles.*] block above, e.g. to force it closed
+# for a keybind that would otherwise inherit "on" from a built-in
+# default (as url/url-tab do above):
 #   [profiles.url]
 #   patterns = ["url", "ipv4", "ipv6"]
-#   preview = "always"
+#   preview = "off"
 #
 # Ten free slots (custom0..custom9) with no built-in default - bind a
 # key to the matching zextract-customN action in herdr-plugin.toml,

@@ -308,6 +308,10 @@ fn builtin_profile(name: &str) -> Option<Profile> {
                 "ipv4".to_string(),
                 "ipv6".to_string(),
             ]),
+            // Matches are typically short (a URL/IP), so the preview's
+            // context is cheap to show and usually worth it - unlike
+            // "open"/"tab", which stay on [ui].preview's off default.
+            preview: Some(PreviewOverride::On),
             ..Profile::default()
         }),
         "url-tab" => Some(Profile {
@@ -317,6 +321,7 @@ fn builtin_profile(name: &str) -> Option<Profile> {
                 "ipv4".to_string(),
                 "ipv6".to_string(),
             ]),
+            preview: Some(PreviewOverride::On),
             ..Profile::default()
         }),
         _ => None,
@@ -651,6 +656,27 @@ mod tests {
             config.resolve_profile("url-tab").grab,
             Some("tab-scan".to_string())
         );
+        // open/tab stay on [ui].preview's own default - only the
+        // URL-only profiles start with the preview already open.
+        assert_eq!(config.resolve_profile("open").preview, None);
+        assert_eq!(config.resolve_profile("tab").preview, None);
+        assert_eq!(
+            config.resolve_profile("url").preview,
+            Some(PreviewOverride::On)
+        );
+        assert_eq!(
+            config.resolve_profile("url-tab").preview,
+            Some(PreviewOverride::On)
+        );
+    }
+
+    #[test]
+    fn resolve_preview_open_is_true_for_builtin_url_profiles_with_zero_config() {
+        let config = Config::default();
+        assert!(config.resolve_preview_open(&config.resolve_profile("url")));
+        assert!(config.resolve_preview_open(&config.resolve_profile("url-tab")));
+        assert!(!config.resolve_preview_open(&config.resolve_profile("open")));
+        assert!(!config.resolve_preview_open(&config.resolve_profile("tab")));
     }
 
     #[test]
