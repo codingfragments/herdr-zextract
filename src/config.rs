@@ -113,6 +113,54 @@ struct RawConfig {
     profiles: std::collections::HashMap<String, Profile>,
     #[serde(default)]
     grab_profiles: std::collections::HashMap<String, GrabProfileOverride>,
+    #[serde(default)]
+    ui: UiConfig,
+}
+
+/// Preview pane launch-state default, ported from the original's
+/// `ui.preview`. A `[profiles.<name>].preview` override takes
+/// precedence when set - see [`PreviewOverride`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum PreviewState {
+    #[default]
+    Off,
+    /// Closed by default. The original remembers the last session's
+    /// state across launches; this port has no such persistence (each
+    /// invocation is a fresh process), so `"auto"` behaves the same as
+    /// `"off"` here - documented as a deliberate simplification.
+    Auto,
+    Always,
+}
+
+/// `[ui]` block - preview pane sizing/default state. Parsed here;
+/// consumed by Phase 9's rendering.
+#[derive(Debug, Clone, Deserialize)]
+pub struct UiConfig {
+    #[serde(default)]
+    pub preview: PreviewState,
+    #[serde(default = "default_preview_open_width")]
+    pub preview_open_width: String,
+    #[serde(default = "default_preview_closed_width")]
+    pub preview_closed_width: String,
+}
+
+impl Default for UiConfig {
+    fn default() -> Self {
+        Self {
+            preview: PreviewState::default(),
+            preview_open_width: default_preview_open_width(),
+            preview_closed_width: default_preview_closed_width(),
+        }
+    }
+}
+
+fn default_preview_open_width() -> String {
+    "90%".to_string()
+}
+
+fn default_preview_closed_width() -> String {
+    "70%".to_string()
 }
 
 /// User override for a named grab profile, ported from the original's
@@ -151,6 +199,22 @@ pub struct Profile {
     pub patterns: Option<Vec<String>>,
     /// Type tags to pre-fill the picker query with as `#tag` filters.
     pub type_filter: Option<Vec<String>>,
+    /// Force the preview pane open/closed for this keybind specifically,
+    /// overriding `[ui].preview`'s launch-state default. `None` means
+    /// "use the `[ui]` default" - this is the original's per-keybind
+    /// `configuration.preview` override (`on`/`off`/`always`/`never`).
+    pub preview: Option<PreviewOverride>,
+}
+
+/// `[profiles.<name>].preview` — per-keybind override of `[ui].preview`.
+/// Consumed by Phase 9's rendering; this phase only adds the schema.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PreviewOverride {
+    On,
+    Off,
+    Always,
+    Never,
 }
 
 /// Built-in defaults for the four named profiles the plugin ships
@@ -199,6 +263,7 @@ pub struct Config {
     pub custom: Vec<CustomPattern>,
     pub profiles: std::collections::HashMap<String, Profile>,
     pub grab_profiles: std::collections::HashMap<String, GrabProfileOverride>,
+    pub ui: UiConfig,
 }
 
 impl Default for Config {
@@ -211,6 +276,7 @@ impl Default for Config {
             custom: Vec::new(),
             profiles: std::collections::HashMap::new(),
             grab_profiles: std::collections::HashMap::new(),
+            ui: UiConfig::default(),
         }
     }
 }
@@ -271,6 +337,17 @@ impl Config {
         }
     }
 
+    /// Whether the preview pane should start open for this launch,
+    /// combining `[ui].preview`'s default with `profile.preview`'s
+    /// override (if set) - the override always wins when present.
+    pub fn resolve_preview_open(&self, profile: &Profile) -> bool {
+        match profile.preview {
+            Some(PreviewOverride::On) | Some(PreviewOverride::Always) => true,
+            Some(PreviewOverride::Off) | Some(PreviewOverride::Never) => false,
+            None => matches!(self.ui.preview, PreviewState::Always),
+        }
+    }
+
     /// Allowlist mode, ported from the original's per-keybind
     /// `patterns` override: only the given tags (built-in or custom
     /// pattern names) run at all, overriding any `disable` list from
@@ -307,6 +384,7 @@ impl Config {
                 custom: raw.patterns.custom,
                 profiles: raw.profiles,
                 grab_profiles: raw.grab_profiles,
+                ui: raw.ui,
             },
             Err(e) => {
                 // log_level can't be consulted here - it lives in the
@@ -462,6 +540,7 @@ mod tests {
                 grab: Some("deep".to_string()),
                 patterns: Some(vec!["secret".to_string()]),
                 type_filter: None,
+                preview: None,
             },
         );
         let profile = config.resolve_profile("custom0");
@@ -537,5 +616,49 @@ mod tests {
         assert!(LogLevel::Error < LogLevel::Warn);
         assert!(LogLevel::Warn < LogLevel::Info);
         assert!(LogLevel::Info < LogLevel::Debug);
+    }
+
+    #[test]
+    fn resolve_preview_open_defaults_closed() {
+        let config = Config::default();
+        assert!(!config.resolve_preview_open(&Profile::default()));
+    }
+
+    #[test]
+    fn resolve_preview_open_ui_always_opens_with_no_override() {
+        let config = Config {
+            ui: UiConfig {
+                preview: PreviewState::Always,
+                ..UiConfig::default()
+            },
+            ..Config::default()
+        };
+        assert!(config.resolve_preview_open(&Profile::default()));
+    }
+
+    #[test]
+    fn resolve_preview_open_profile_override_wins_over_ui_default() {
+        let config = Config {
+            ui: UiConfig {
+                preview: PreviewState::Always,
+                ..UiConfig::default()
+            },
+            ..Config::default()
+        };
+        let profile = Profile {
+            preview: Some(PreviewOverride::Never),
+            ..Profile::default()
+        };
+        assert!(!config.resolve_preview_open(&profile));
+    }
+
+    #[test]
+    fn resolve_preview_open_profile_on_overrides_off_default() {
+        let config = Config::default();
+        let profile = Profile {
+            preview: Some(PreviewOverride::On),
+            ..Profile::default()
+        };
+        assert!(config.resolve_preview_open(&profile));
     }
 }

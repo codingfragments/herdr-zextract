@@ -74,6 +74,18 @@ fn run() -> Result<(), String> {
         ),
     );
     config.disabled.extend(grab_profile.disable.iter().cloned());
+
+    // Preview pane rendering itself is Phase 9 - resolved here anyway
+    // so `[ui].preview`/`[profiles.<name>].preview` are both exercised
+    // (and observable via log_level="debug") well before Phase 9 lands.
+    let preview_open = config.resolve_preview_open(&profile);
+    config.log(
+        config::LogLevel::Debug,
+        &format!(
+            "preview: open={preview_open} open_width={:?} closed_width={:?}",
+            config.ui.preview_open_width, config.ui.preview_closed_width
+        ),
+    );
     let captures = grab::capture(
         &grab_profile,
         &socket_path,

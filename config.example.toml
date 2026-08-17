@@ -11,6 +11,14 @@
 # Verbosity of stderr diagnostics. One of: off, error, warn, info, debug.
 # log_level = "info"
 
+[ui]
+# Preview pane launch-state default. One of: off, auto, always.
+# "auto" behaves the same as "off" here - this port has no persisted
+# last-session state to remember across invocations.
+# preview = "off"
+# preview_open_width = "90%"
+# preview_closed_width = "70%"
+
 [patterns]
 # Built-in type tags or custom pattern names to skip entirely.
 # Built-in tags: url, file, diag, git, sha, ipv4, ipv6, uuid, quote, cmd, secret
@@ -61,6 +69,13 @@ flag_anchored = false
 # [profiles.url-tab]
 # grab = "tab-scan"
 # patterns = ["url", "ipv4", "ipv6"]
+#
+# `preview` forces the preview pane open/closed for one specific
+# keybind, overriding [ui].preview's default. One of: on, off, always,
+# never. Add it to any [profiles.*] block above, e.g.:
+#   [profiles.url]
+#   patterns = ["url", "ipv4", "ipv6"]
+#   preview = "always"
 #
 # Ten free slots (custom0..custom9) with no built-in default - bind a
 # key to the matching zextract-customN action in herdr-plugin.toml,

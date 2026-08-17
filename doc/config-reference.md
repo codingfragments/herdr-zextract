@@ -51,6 +51,32 @@ in the same file that failed to parse.
 
 ---
 
+## `[ui]` — preview pane sizing and default state
+
+```toml
+[ui]
+preview = "off"                # default
+preview_open_width = "90%"     # default
+preview_closed_width = "70%"   # default
+```
+
+| Key | Description |
+|---|---|
+| `preview` | Preview pane state at launch. `"off"` = closed (default), `"auto"` = closed (see note below), `"always"` = open. Overridden per keybind by `[profiles.<name>].preview` when set. |
+| `preview_open_width` | Popup width while the preview is open. Percent string or cell count. |
+| `preview_closed_width` | Popup width while the preview is closed. |
+
+**Note on `"auto"`:** the original remembers the previous session's
+open/closed state across launches. This port has no such persistence —
+each invocation is a fresh process with nothing to remember — so
+`"auto"` behaves identically to `"off"` here.
+
+The preview pane's actual *rendering* doesn't exist yet (see
+PLANNING.md §11 Phase 9); this block only adds the config surface that
+phase reads from.
+
+---
+
 ## `[patterns]` — global disable list
 
 ```toml
@@ -181,6 +207,7 @@ profile name gets selected by a keybind.
 | `grab` | Scrollback-depth / scan-scope profile: `quick` (150 lines, current pane — default), `deep` (1500 lines), `viewport` (visible screen only), `full` (entire scrollback), `tab-scan` (every pane on the current tab, 150 lines each, last-focused pane first). Unrecognized values fall back to `quick`. |
 | `patterns` | Allowlist of type tags (built-in or custom) to extract at all for this profile, overriding `[patterns].disable` entirely. Omit for no restriction (the config's own `disable` list still applies). |
 | `type_filter` | Type tags to pre-fill the picker's query with as `#tag` filters — narrows what's shown, doesn't restrict what's extracted (unlike `patterns`). |
+| `preview` | Force the preview pane open/closed for this keybind specifically, overriding `[ui].preview`'s default. One of `on`, `off`, `always`, `never`. Omit to use the `[ui]` default. |
 
 **Built-in profiles:** `open`, `tab`, `url`, and `url-tab` have
 built-in Rust-side defaults matching the four actions
