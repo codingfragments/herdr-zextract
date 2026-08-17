@@ -100,6 +100,15 @@ against a real Herdr install, see [§12 Open questions](#12-open-questions).
 | Clipboard (host `Clipboard` action) | `arboard` crate directly (plugin has full OS access) |
 | Open URL/editor (host action, if any) | Shell out via `std::process::Command` |
 
+Confirmed in Phase 1 (see `phase/1-socket-client-echo`): every socket
+response payload is nested one level deeper than its JSON Schema
+`$defs` entry suggests — e.g. `pane.read`'s result is
+`{"type":"pane_read","read":{...PaneReadResult fields...}}`, not the
+`PaneReadResult` fields directly at the top of `result`. Same pattern
+for `plugin.pane.open` → `{"type":"plugin_pane_opened","plugin_pane":
+{...}}`. Expect this `{"type": "...", "<name>": payload}` envelope for
+every socket call in later phases (actions' `pane.send_input`, etc.).
+
 ## 6. Language & dependency choice
 
 **Rust**, carrying over as much of the original crate's logic as possible.
