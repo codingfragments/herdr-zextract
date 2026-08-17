@@ -157,7 +157,4 @@ fn main() {
     if let Err(message) = run() {
         eprintln!("herdr-zextract error: {message}");
     }
-    println!("\n-- press Enter to close --");
-    let mut discard = String::new();
-    let _ = std::io::stdin().read_line(&mut discard);
 }
