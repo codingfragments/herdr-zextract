@@ -1,0 +1,29 @@
+# herdr-zextract config
+#
+# Copy this file to the path printed by:
+#   herdr plugin config-dir herdr-zextract
+# as config.toml (or run the plugin once with no config and press
+# Ctrl-W in the picker to have it write this same file for you).
+#
+# Full reference: doc/config-reference.md in the plugin repo.
+# This file is read once per popup launch - no live reload.
+
+[patterns]
+# Built-in type tags or custom pattern names to skip entirely.
+# Built-in tags: url, file, diag, git, sha, ipv4, ipv6, uuid, quote, cmd, secret
+# disable = ["ipv6"]
+
+[patterns.secret]
+# Curated formats (JWT, AWS, GitHub, ...) always run. Set false to
+# disable the broader entropy-based fallback pass.
+entropy_filter = true
+
+# Custom regex patterns. Each gets its own #name filter tag in the
+# picker. Uncomment and adjust, or add your own [[patterns.custom]]
+# blocks below.
+#
+# [[patterns.custom]]
+# name = "jira"
+# regex = "([A-Z]+)-([0-9]+)"
+# type = "url"
+# template = "https://jira.example.com/browse/{1}-{2}"

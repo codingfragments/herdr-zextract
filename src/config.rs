@@ -21,32 +21,11 @@ use serde::Deserialize;
 
 /// Starter config written by [`write_default`], mirroring the
 /// original plugin's `Ctrl-W` "write starter config" banner action.
-/// Heavily commented, everything left at its default value so a user
-/// can uncomment/edit just the bits they want.
-pub const DEFAULT_CONFIG_TOML: &str = r#"# herdr-zextract config
-# Full reference: doc/config-reference.md in the plugin repo.
-# This file is read once per popup launch - no live reload.
-
-[patterns]
-# Built-in type tags or custom pattern names to skip entirely.
-# Built-in tags: url, file, diag, git, sha, ipv4, ipv6, uuid, quote, cmd, secret
-# disable = ["ipv6"]
-
-[patterns.secret]
-# Curated formats (JWT, AWS, GitHub, ...) always run. Set false to
-# disable the broader entropy-based fallback pass.
-entropy_filter = true
-
-# Custom regex patterns. Each gets its own #name filter tag in the
-# picker. Uncomment and adjust, or add your own [[patterns.custom]]
-# blocks below.
-#
-# [[patterns.custom]]
-# name = "jira"
-# regex = "([A-Z]+)-([0-9]+)"
-# type = "url"
-# template = "https://jira.example.com/browse/{1}-{2}"
-"#;
+/// Sourced directly from `config.example.toml` at the repo root (the
+/// copy-pasteable template mentioned in the README and
+/// `doc/config-reference.md`) so the two can never drift apart -
+/// there is exactly one place this text lives.
+pub const DEFAULT_CONFIG_TOML: &str = include_str!("../config.example.toml");
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct CustomPattern {

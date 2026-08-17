@@ -12,6 +12,13 @@ If the file is missing, or fails to parse, built-in defaults are used —
 a broken config never crashes the plugin (a parse error is reported on
 stderr, visible in `herdr plugin log`).
 
+**Template:** [`config.example.toml`](../config.example.toml) at the
+repo root is a ready-to-copy starter with every key from this doc,
+commented out at its default value. It's also what `main.rs` embeds
+verbatim (`include_str!`) as the file the picker's `Ctrl-W` action
+writes when no config exists yet — one source of truth, so the
+template can't drift from what the plugin actually ships.
+
 **Format note:** the original `zellij-zextract` plugin this is ported
 from uses KDL, matching Zellij's own config format. This port uses TOML
 instead, matching Herdr's own config conventions (`config.toml`,
