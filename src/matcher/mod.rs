@@ -13,6 +13,7 @@
 //!     debug log to feed.
 
 pub mod command;
+pub mod custom;
 pub mod diagnostic;
 pub mod file;
 pub mod git;
@@ -37,6 +38,21 @@ pub struct Match {
     /// (latest = larger `span.0`).
     pub span: (usize, usize),
     pub fields: HashMap<String, String>,
+}
+
+impl Match {
+    /// The tag used for display, `#type` filtering, and the list row
+    /// label. Custom patterns stash their configured name under the
+    /// `__label` field; this returns that when present, otherwise
+    /// `ty.tag()`. (A dedicated struct field would need touching every
+    /// built-in pattern module's `Match` literal for a field only
+    /// `custom.rs` ever sets - not worth the diff.)
+    pub fn effective_tag(&self) -> &str {
+        self.fields
+            .get("__label")
+            .map(String::as_str)
+            .unwrap_or_else(|| self.ty.tag())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -68,6 +84,25 @@ impl MatchType {
             MatchType::QuotedString => "quote",
             MatchType::Command => "cmd",
             MatchType::Secret => "secret",
+        }
+    }
+
+    /// Inverse of [`tag`](Self::tag). Used to resolve a custom
+    /// pattern's configured `type` string to a built-in `MatchType`.
+    pub fn from_tag(s: &str) -> Option<Self> {
+        match s {
+            "url" => Some(Self::Url),
+            "file" => Some(Self::File),
+            "diag" => Some(Self::Diagnostic),
+            "git" => Some(Self::Git),
+            "sha" => Some(Self::Sha),
+            "ipv4" => Some(Self::Ipv4),
+            "ipv6" => Some(Self::Ipv6),
+            "uuid" => Some(Self::Uuid),
+            "quote" => Some(Self::QuotedString),
+            "cmd" => Some(Self::Command),
+            "secret" => Some(Self::Secret),
+            _ => None,
         }
     }
 }
@@ -117,21 +152,57 @@ pub fn trim_trailing_punct(s: &str) -> &str {
     })
 }
 
-/// Run all built-in patterns against `text` and return the combined,
-/// deduped, recency-ordered (latest match first) matches.
+/// Run all built-in patterns (no user config) against `text`. A thin
+/// convenience wrapper over [`extract_with_config`] for callers (and
+/// most tests) that don't need custom patterns or disabled types.
+/// Production code (`main.rs`) uses `extract_with_config` directly, so
+/// this is unused outside `#[cfg(test)]` in a normal build.
+#[allow(dead_code)]
 pub fn extract(text: &str) -> Vec<Match> {
+    extract_with_config(text, &crate::config::Config::default())
+}
+
+/// Run all built-in patterns plus `config`'s custom patterns against
+/// `text`, honoring `config.disabled` and `config.secret_entropy_filter`,
+/// and return the combined, deduped, recency-ordered (latest match
+/// first) matches.
+pub fn extract_with_config(text: &str, config: &crate::config::Config) -> Vec<Match> {
+    let dis = &config.disabled;
     let mut all: Vec<Match> = Vec::new();
-    all.extend(url::extract(text));
-    all.extend(file::extract(text));
-    all.extend(diagnostic::extract(text));
-    all.extend(git::extract(text));
-    all.extend(sha::extract(text));
-    all.extend(ipv4::extract(text));
-    all.extend(ipv6::extract(text));
-    all.extend(uuid::extract(text));
-    all.extend(quoted::extract(text));
-    all.extend(command::extract(text));
-    all.extend(secret::extract(text));
+    if !dis.contains("url") {
+        all.extend(url::extract(text));
+    }
+    if !dis.contains("file") {
+        all.extend(file::extract(text));
+    }
+    if !dis.contains("diag") {
+        all.extend(diagnostic::extract(text));
+    }
+    if !dis.contains("git") {
+        all.extend(git::extract(text));
+    }
+    if !dis.contains("sha") {
+        all.extend(sha::extract(text));
+    }
+    if !dis.contains("ipv4") {
+        all.extend(ipv4::extract(text));
+    }
+    if !dis.contains("ipv6") {
+        all.extend(ipv6::extract(text));
+    }
+    if !dis.contains("uuid") {
+        all.extend(uuid::extract(text));
+    }
+    if !dis.contains("quote") {
+        all.extend(quoted::extract(text));
+    }
+    if !dis.contains("cmd") {
+        all.extend(command::extract(text));
+    }
+    if !dis.contains("secret") {
+        all.extend(secret::extract(text, config.secret_entropy_filter));
+    }
+    all.extend(custom::extract(text, &config.custom, dis));
 
     let pass1 = dedup_keep_latest(all);
     dedup_by_raw_priority(pass1)
@@ -306,5 +377,140 @@ mod fixture_tests {
                 "stress fixture missing required type {required:?}"
             );
         }
+    }
+
+    fn cp(name: &str, regex: &str, template: Option<&str>) -> crate::config::CustomPattern {
+        crate::config::CustomPattern {
+            name: name.to_string(),
+            regex: regex.to_string(),
+            ty: "url".to_string(),
+            template: template.map(str::to_string),
+        }
+    }
+
+    fn extract_custom_only(text: &str, patterns: &[crate::config::CustomPattern]) -> Vec<Match> {
+        let config = crate::config::Config {
+            disabled: HashSet::new(),
+            secret_entropy_filter: true,
+            custom: patterns.to_vec(),
+        };
+        // Skip all built-ins - these fixtures are about custom-pattern
+        // extraction specifically, and their scrollback also trips
+        // several built-in patterns (ipv4, sha, ...) that would just be
+        // noise for what's being asserted here.
+        custom::extract(text, &config.custom, &config.disabled)
+    }
+
+    #[test]
+    fn custom_patterns_fixture_port_and_jira() {
+        let text = include_str!("../../tests/fixtures/custom_patterns.txt");
+        let patterns = vec![
+            cp("port", r":[0-9]{4,5}\b", None),
+            cp(
+                "jira",
+                r"[A-Z]+-[0-9]+",
+                Some("https://jira.example.com/browse/{match}"),
+            ),
+        ];
+        let matches = extract_custom_only(text, &patterns);
+
+        let ports: Vec<_> = matches.iter().filter(|m| m.raw.starts_with(':')).collect();
+        assert!(
+            ports.len() >= 4,
+            "expected >=4 port matches, got {}: {:?}",
+            ports.len(),
+            ports.iter().map(|m| &m.raw).collect::<Vec<_>>()
+        );
+
+        let jira_by_display: Vec<_> = matches
+            .iter()
+            .filter(|m| m.display.contains("jira.example.com"))
+            .collect();
+        assert!(
+            jira_by_display.len() >= 4,
+            "expected >=4 jira matches with template applied, got {}: {:?}",
+            jira_by_display.len(),
+            jira_by_display
+                .iter()
+                .map(|m| &m.display)
+                .collect::<Vec<_>>()
+        );
+
+        let proj123 = matches
+            .iter()
+            .find(|m| m.display == "https://jira.example.com/browse/PROJ-123")
+            .unwrap();
+        assert_eq!(proj123.raw, "https://jira.example.com/browse/PROJ-123");
+        assert_eq!(
+            proj123.fields.get("url").unwrap(),
+            "https://jira.example.com/browse/PROJ-123"
+        );
+    }
+
+    #[test]
+    fn multi_group_patterns_fixture() {
+        let text = include_str!("../../tests/fixtures/multi_group_patterns.txt");
+        let patterns = vec![
+            cp("port", r":[0-9]{4,5}\b", None),
+            cp(
+                "jira",
+                r"([A-Z]+)-([0-9]+[A-Z]*)",
+                Some("https://jira.example.com/browse/{1}-{2}"),
+            ),
+            cp(
+                "github-pr",
+                r"github\.com/([^/\s]+)/([^/\s]+)/pull/([0-9]+)",
+                Some("https://github.com/{1}/{2}/pull/{3}"),
+            ),
+        ];
+        let matches = extract_custom_only(text, &patterns);
+
+        let ports: Vec<_> = matches
+            .iter()
+            .filter(|m| m.effective_tag() == "port")
+            .collect();
+        assert!(
+            ports.len() >= 3,
+            "expected >=3 port matches, got {}",
+            ports.len()
+        );
+
+        let jira: Vec<_> = matches
+            .iter()
+            .filter(|m| m.effective_tag() == "jira")
+            .collect();
+        assert!(
+            jira.len() >= 4,
+            "expected >=4 jira matches, got {}",
+            jira.len()
+        );
+
+        let st = jira
+            .iter()
+            .find(|m| m.fields.get("2").map(String::as_str) == Some("154R"))
+            .expect("ST-154R not found");
+        assert_eq!(st.fields.get("1").unwrap(), "ST");
+        assert_eq!(st.fields.get("2").unwrap(), "154R");
+        assert_eq!(st.display, "https://jira.example.com/browse/ST-154R");
+
+        let prs: Vec<_> = matches
+            .iter()
+            .filter(|m| m.effective_tag() == "github-pr")
+            .collect();
+        assert!(prs.len() >= 3, "expected >=3 PR matches, got {}", prs.len());
+
+        let pr99 = prs
+            .iter()
+            .find(|m| m.fields.get("3").map(String::as_str) == Some("99"))
+            .expect("PR #99 not found");
+        assert_eq!(pr99.fields.get("1").unwrap(), "myorg");
+        assert_eq!(pr99.fields.get("2").unwrap(), "myrepo");
+        assert_eq!(pr99.display, "https://github.com/myorg/myrepo/pull/99");
+
+        let pr7 = prs
+            .iter()
+            .find(|m| m.fields.get("1").map(String::as_str) == Some("otherorg"))
+            .expect("cross-org PR not found");
+        assert_eq!(pr7.display, "https://github.com/otherorg/otherrepo/pull/7");
     }
 }

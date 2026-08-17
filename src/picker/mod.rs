@@ -67,24 +67,37 @@ fn color_for_tag(tag: &str) -> Color {
 
 struct State {
     matches: Vec<Match>,
+    /// Custom pattern names, appended to `TYPE_PRIORITY`'s tags when
+    /// resolving `#name` filter tokens - lets a custom pattern be
+    /// filtered by its own configured name, not just its underlying type.
+    custom_tags: Vec<String>,
     query: String,
     parsed_query: ParsedQuery,
     fuzzy: FuzzyEngine,
     filtered: Vec<ScoredMatch>,
     list_state: ListState,
     last_rows: usize,
+    /// True when `$HERDR_PLUGIN_CONFIG_DIR/config.toml` doesn't exist
+    /// yet - shows the `Ctrl-W` hint and lets it write a starter file.
+    /// Cleared after a successful write so the hint disappears.
+    config_missing: bool,
+    /// Transient status line, cleared on the next keystroke.
+    message: Option<String>,
 }
 
 impl State {
-    fn new(matches: Vec<Match>) -> Self {
+    fn new(matches: Vec<Match>, custom_tags: Vec<String>, config_missing: bool) -> Self {
         let mut state = Self {
             matches,
+            custom_tags,
             query: String::new(),
             parsed_query: ParsedQuery::default(),
             fuzzy: FuzzyEngine::new(),
             filtered: Vec::new(),
             list_state: ListState::default(),
             last_rows: 24,
+            config_missing,
+            message: None,
         };
         state.refilter();
         state
@@ -100,7 +113,8 @@ impl State {
             .and_then(|i| self.filtered.get(i))
             .map(|s| s.index);
 
-        let tags: Vec<&str> = TYPE_PRIORITY.iter().map(|t| t.tag()).collect();
+        let mut tags: Vec<&str> = TYPE_PRIORITY.iter().map(|t| t.tag()).collect();
+        tags.extend(self.custom_tags.iter().map(String::as_str));
         self.parsed_query = query::parse_query(&self.query, &tags);
         let parsed = &self.parsed_query;
 
@@ -109,7 +123,7 @@ impl State {
             .iter()
             .enumerate()
             .filter(|(_, m)| {
-                let tag = m.ty.tag();
+                let tag = m.effective_tag();
                 let include_ok =
                     parsed.includes.is_empty() || parsed.includes.iter().any(|t| t == tag);
                 let exclude_ok = !parsed.excludes.iter().any(|t| t == tag);
@@ -183,8 +197,15 @@ pub enum PickerResult {
 }
 
 /// Run the picker over `matches` as a fullscreen terminal UI.
-pub fn run(matches: Vec<Match>) -> io::Result<PickerResult> {
-    let mut state = State::new(matches);
+/// `custom_tags` are the configured names of any custom patterns, so
+/// they resolve as `#name` filter tokens alongside the built-in types.
+/// `config_missing` shows the `Ctrl-W` "write starter config" hint.
+pub fn run(
+    matches: Vec<Match>,
+    custom_tags: &[String],
+    config_missing: bool,
+) -> io::Result<PickerResult> {
+    let mut state = State::new(matches, custom_tags.to_vec(), config_missing);
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -230,7 +251,21 @@ fn run_loop(
         if key.kind != KeyEventKind::Press {
             continue;
         }
+        state.message = None; // any keystroke clears the previous status line
         if key.modifiers.contains(KeyModifiers::CONTROL) {
+            if key.code == KeyCode::Char('w') {
+                if state.config_missing {
+                    match crate::config::write_default() {
+                        Ok(path) => {
+                            state.config_missing = false;
+                            state.message =
+                                Some(format!("wrote default config to {}", path.display()));
+                        }
+                        Err(e) => state.message = Some(format!("failed to write config: {e}")),
+                    }
+                }
+                continue;
+            }
             let verb = match key.code {
                 KeyCode::Char('y') => Some(Verb::CopyRaw),
                 KeyCode::Char('i') => Some(Verb::Insert),
@@ -335,6 +370,19 @@ fn render_input(frame: &mut Frame, area: Rect, state: &State) {
         format!("{}/{}", state.filtered.len(), state.matches.len()),
         Style::default().fg(MUTED),
     ));
+    if let Some(msg) = &state.message {
+        spans.push(Span::raw("   "));
+        spans.push(Span::styled(
+            msg.clone(),
+            Style::default().fg(HIGHLIGHT).add_modifier(Modifier::BOLD),
+        ));
+    } else if state.config_missing {
+        spans.push(Span::raw("   "));
+        spans.push(Span::styled(
+            "(Ctrl-W: write starter config)",
+            Style::default().fg(MUTED).add_modifier(Modifier::DIM),
+        ));
+    }
     let p = Paragraph::new(Line::from(spans)).block(
         Block::default()
             .borders(Borders::ALL)
@@ -365,10 +413,10 @@ fn render_list(frame: &mut Frame, area: Rect, state: &mut State) {
         .filter_map(|s| state.matches.get(s.index).map(|m| (s, m)))
         .map(|(s, m)| {
             let tag_span = Span::styled(
-                format!("[{}]  ", m.ty.tag()),
+                format!("[{}]  ", m.effective_tag()),
                 Style::default().fg(color_for_type(m.ty)),
             );
-            let tag_overhead = m.ty.tag().chars().count() + 6; // "[tag]  "
+            let tag_overhead = m.effective_tag().chars().count() + 6; // "[tag]  "
             let avail = (area.width as usize).saturating_sub(tag_overhead);
             let use_middle = matches!(
                 m.ty,

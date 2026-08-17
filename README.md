@@ -24,6 +24,21 @@ fuzzy-filter, pick, and act:
 Fills the same gap tmux users cover with `extrakto` / `fingers` /
 `fzf-links`.
 
+## Configuration
+
+Optional — the plugin works with zero config. To disable built-in
+patterns, tune secret detection, or add your own regex patterns, copy
+[`config.example.toml`](config.example.toml) to:
+
+```sh
+herdr plugin config-dir herdr-zextract   # prints the target directory
+```
+
+as `config.toml`. Or launch the plugin with no config and press
+`Ctrl-W` in the picker — it writes the same template for you.
+
+Full schema: [`doc/config-reference.md`](doc/config-reference.md).
+
 ## Build
 
 A native Rust binary — no WASM target involved.

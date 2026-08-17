@@ -64,7 +64,10 @@ fn formats() -> &'static [FormatPattern] {
     })
 }
 
-pub fn extract(text: &str) -> Vec<Match> {
+/// `entropy_filter` toggles the entropy-fallback pass (config-driven,
+/// `patterns.secret.entropy_filter` - default true). Curated formats
+/// (JWT, AWS, GitHub, ...) always run regardless.
+pub fn extract(text: &str, entropy_filter: bool) -> Vec<Match> {
     let mut out = Vec::new();
     let mut matched_spans: Vec<(usize, usize)> = Vec::new();
     let mut byte_offset_of_line = 0usize;
@@ -83,17 +86,19 @@ pub fn extract(text: &str) -> Vec<Match> {
             }
         }
         // Entropy fallback on remaining tokens.
-        for (raw, off) in tokens_with_byte_offsets(line) {
-            let span_start = byte_offset_of_line + off;
-            let span_end = span_start + raw.len();
-            if overlaps(&matched_spans, span_start, span_end) {
-                continue;
+        if entropy_filter {
+            for (raw, off) in tokens_with_byte_offsets(line) {
+                let span_start = byte_offset_of_line + off;
+                let span_end = span_start + raw.len();
+                if overlaps(&matched_spans, span_start, span_end) {
+                    continue;
+                }
+                if !passes_entropy_filter(raw) {
+                    continue;
+                }
+                matched_spans.push((span_start, span_end));
+                push(&mut out, raw, "entropy", line, span_start, span_end);
             }
-            if !passes_entropy_filter(raw) {
-                continue;
-            }
-            matched_spans.push((span_start, span_end));
-            push(&mut out, raw, "entropy", line, span_start, span_end);
         }
         byte_offset_of_line += line.len() + 1;
     }
@@ -208,45 +213,48 @@ mod tests {
     fn detects_jwt() {
         let token =
             "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NSJ9.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U";
-        let m = extract(&format!("Authorization: {}", token));
+        let m = extract(&format!("Authorization: {}", token), true);
         assert_eq!(m.len(), 1);
         assert_eq!(m[0].fields["secret_format"], "jwt");
     }
 
     #[test]
     fn detects_aws_access_key() {
-        let m = extract("AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE");
+        let m = extract("AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE", true);
         assert!(m.iter().any(|x| x.fields["secret_format"] == "aws"));
     }
 
     #[test]
     fn detects_github_token() {
-        let m = extract("export TOKEN=ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789AB");
+        let m = extract(
+            "export TOKEN=ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789AB",
+            true,
+        );
         assert!(m.iter().any(|x| x.fields["secret_format"] == "github"));
     }
 
     #[test]
     fn detects_gitlab_pat() {
-        let m = extract("GITLAB_TOKEN=glpat-aBcDeFgHiJkLmNoPqRsT");
+        let m = extract("GITLAB_TOKEN=glpat-aBcDeFgHiJkLmNoPqRsT", true);
         assert!(m.iter().any(|x| x.fields["secret_format"] == "gitlab"));
     }
 
     #[test]
     fn detects_stripe_key() {
-        let m = extract("STRIPE=sk_live_aBcDeFgHiJkLmNoPqRsTuVwX");
+        let m = extract("STRIPE=sk_live_aBcDeFgHiJkLmNoPqRsTuVwX", true);
         assert!(m.iter().any(|x| x.fields["secret_format"] == "stripe"));
     }
 
     #[test]
     fn detects_bearer() {
-        let m = extract("Authorization: Bearer aBcDeFgHi");
+        let m = extract("Authorization: Bearer aBcDeFgHi", true);
         assert!(m.iter().any(|x| x.fields["secret_format"] == "bearer"));
     }
 
     #[test]
     fn entropy_fallback_catches_unknown_format() {
         // 30 chars, 3 classes (upper+lower+digit), high entropy
-        let m = extract("token: aBc12345XyZ987KkPpQqRrSsTtUu");
+        let m = extract("token: aBc12345XyZ987KkPpQqRrSsTtUu", true);
         assert!(m
             .iter()
             .any(|x| x.fields.get("secret_format").map(|s| s.as_str()) == Some("entropy")));
@@ -254,13 +262,13 @@ mod tests {
 
     #[test]
     fn entropy_rejects_pure_repetition() {
-        let m = extract("token: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        let m = extract("token: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", true);
         assert!(m.is_empty());
     }
 
     #[test]
     fn entropy_rejects_short_tokens() {
-        let m = extract("token: aB1cD2eF3");
+        let m = extract("token: aB1cD2eF3", true);
         assert!(m.is_empty());
     }
 
@@ -270,8 +278,22 @@ mod tests {
         // precedence — exactly one match emitted, with format=jwt.
         let token =
             "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NSJ9.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U";
-        let m = extract(token);
+        let m = extract(token, true);
         assert_eq!(m.len(), 1);
         assert_eq!(m[0].fields["secret_format"], "jwt");
+    }
+
+    #[test]
+    fn entropy_filter_disabled_suppresses_fallback_matches() {
+        let m = extract("token: aBc12345XyZ987KkPpQqRrSsTtUu", false);
+        assert!(!m
+            .iter()
+            .any(|x| x.fields.get("secret_format").map(|s| s.as_str()) == Some("entropy")));
+    }
+
+    #[test]
+    fn entropy_filter_disabled_still_detects_curated_formats() {
+        let m = extract("AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE", false);
+        assert!(m.iter().any(|x| x.fields["secret_format"] == "aws"));
     }
 }
