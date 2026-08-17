@@ -14,8 +14,15 @@
 [ui]
 # Preview pane launch-state default. One of: off, auto, always.
 # "auto" behaves the same as "off" here - this port has no persisted
-# last-session state to remember across invocations.
+# last-session state to remember across invocations. Toggle with `p`
+# (List mode) or Ctrl-P (either mode) once the picker is open.
 # preview = "off"
+#
+# List column's width while the preview is open - percent string or
+# bare cell count; the preview column takes whatever's left. No
+# live-resize equivalent for the real popup exists here (unlike the
+# original), so preview_closed_width is accepted but has no effect -
+# see doc/config-reference.md.
 # preview_open_width = "90%"
 # preview_closed_width = "70%"
 
