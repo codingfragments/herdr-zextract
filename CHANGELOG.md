@@ -47,7 +47,9 @@ plus a few Herdr-native additions.
   its exact extracted text both picked out in distinct colors.
 - **CI & release.** `cargo fmt`/`clippy -D warnings`/`test` on every
   PR (macOS + Linux); tagged releases build and publish binaries for
-  all four supported target triples.
+  `aarch64-apple-darwin`, `x86_64-unknown-linux-gnu`, and
+  `aarch64-unknown-linux-gnu` (no Intel Mac binary - build from source
+  there instead).
 
 ### Known platform gaps (Herdr has no equivalent yet)
 

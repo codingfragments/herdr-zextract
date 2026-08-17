@@ -132,8 +132,10 @@ Rationale:
 
 ## 7. Portability plan (macOS + Linux)
 
-- Target triples: `aarch64-apple-darwin`, `x86_64-apple-darwin`,
-  `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`.
+- Target triples: `aarch64-apple-darwin`, `x86_64-unknown-linux-gnu`,
+  `aarch64-unknown-linux-gnu`. No `x86_64-apple-darwin` (Intel Mac) build
+  - not worth the CI minutes for a platform with negligible remaining
+  install base among this plugin's users.
 - No Windows target for now (not a requirement; Herdr's Windows beta uses
   a different IPC transport — named pipes — which this plugin won't
   implement initially).
@@ -218,12 +220,14 @@ manifest is written and tested against a real Herdr install.
 
 ## 9. CI / release plan (GitHub Actions)
 
-Planned workflow, `.github/workflows/release.yml` (not yet written):
+Implemented in `.github/workflows/release.yml` and `ci.yml` (Phase 10):
 
 - Trigger: tag push matching `v*.*.*`.
-- Matrix:
+- Matrix (three target triples, not four - `x86_64-apple-darwin` was
+  dropped before the first release; not worth the CI minutes for a
+  platform with negligible remaining install base among this plugin's
+  users):
   - `macos-14` (arm64, native) → `aarch64-apple-darwin`
-  - `macos-13` (x86_64, native) → `x86_64-apple-darwin`
   - `ubuntu-latest` → `x86_64-unknown-linux-gnu`
   - `ubuntu-24.04-arm` (native ARM, GA in both public and private repos as
     of 2026-01-29) → `aarch64-unknown-linux-gnu` — no `cross`/QEMU needed,
