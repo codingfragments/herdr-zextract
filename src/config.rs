@@ -115,6 +115,36 @@ struct RawConfig {
     grab_profiles: std::collections::HashMap<String, GrabProfileOverride>,
     #[serde(default)]
     ui: UiConfig,
+    #[serde(default)]
+    colors: ColorsConfig,
+}
+
+/// `[colors]` block - full UI palette override, ported from the
+/// original's `ColorsConfig`. Every key is optional; omitting a key
+/// (or the whole block) keeps the built-in ANSI-palette default for
+/// that slot. Values accept an ANSI name (`"dark_gray"`), `#rrggbb`
+/// hex, or `rgb(r,g,b)` - parsing/defaulting happens in `picker::` at
+/// render time, so this struct only carries raw strings.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct ColorsConfig {
+    pub muted: Option<String>,
+    pub accent: Option<String>,
+    pub cursor_bg: Option<String>,
+    pub cursor_fg: Option<String>,
+    pub highlight: Option<String>,
+    pub error: Option<String>,
+    pub fallback_type: Option<String>,
+    pub type_url: Option<String>,
+    pub type_file: Option<String>,
+    pub type_diag: Option<String>,
+    pub type_git: Option<String>,
+    pub type_sha: Option<String>,
+    pub type_ipv4: Option<String>,
+    pub type_ipv6: Option<String>,
+    pub type_uuid: Option<String>,
+    pub type_quoted: Option<String>,
+    pub type_command: Option<String>,
+    pub type_secret: Option<String>,
 }
 
 /// Preview pane launch-state default, ported from the original's
@@ -264,6 +294,7 @@ pub struct Config {
     pub profiles: std::collections::HashMap<String, Profile>,
     pub grab_profiles: std::collections::HashMap<String, GrabProfileOverride>,
     pub ui: UiConfig,
+    pub colors: ColorsConfig,
 }
 
 impl Default for Config {
@@ -277,6 +308,7 @@ impl Default for Config {
             profiles: std::collections::HashMap::new(),
             grab_profiles: std::collections::HashMap::new(),
             ui: UiConfig::default(),
+            colors: ColorsConfig::default(),
         }
     }
 }
@@ -385,6 +417,7 @@ impl Config {
                 profiles: raw.profiles,
                 grab_profiles: raw.grab_profiles,
                 ui: raw.ui,
+                colors: raw.colors,
             },
             Err(e) => {
                 // log_level can't be consulted here - it lives in the

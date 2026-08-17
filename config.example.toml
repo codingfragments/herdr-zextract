@@ -102,3 +102,125 @@ flag_anchored = false
 # [grab_profiles.jira-deep]
 # source = "scrollback"
 # lines = 500
+
+# [colors] — full UI palette override. Every key is optional; omit any
+# key (or the whole block) to keep the built-in ANSI-palette default
+# for that slot. Values accept an ANSI name, "#rrggbb" hex, or
+# "rgb(r,g,b)". Uncomment ONE preset block below, or hand-pick
+# individual keys - don't uncomment more than one [colors] block.
+#
+# Slot reference:
+#   muted         — gutters, hints, secondary text, empty-state messages
+#   accent        — selected-item "*" gutter
+#   cursor_bg     — list cursor row background
+#   cursor_fg     — list cursor row foreground (must contrast cursor_bg)
+#   highlight     — fuzzy-match chars, banner border, footer status messages
+#   error         — rejection/failure status messages
+#   fallback_type — color for a custom pattern with no dedicated type_* slot
+#   type_url type_file type_diag type_git type_sha type_ipv4 type_ipv6
+#   type_uuid type_quoted type_command type_secret — per-#tag colors
+#
+# Catppuccin Mocha (dark)
+# [colors]
+# muted          = "#585b70"
+# accent         = "#89dceb"
+# cursor_bg      = "#89b4fa"
+# cursor_fg      = "#1e1e2e"
+# highlight      = "#f9e2af"
+# error          = "#f38ba8"
+# fallback_type  = "#a6adc8"
+# type_url       = "#89b4fa"
+# type_file      = "#a6e3a1"
+# type_diag      = "#f38ba8"
+# type_git       = "#f9e2af"
+# type_sha       = "#fab387"
+# type_ipv4      = "#89dceb"
+# type_ipv6      = "#74c7ec"
+# type_uuid      = "#cba6f7"
+# type_quoted    = "#a6adc8"
+# type_command   = "#f5c2e7"
+# type_secret    = "#eba0ac"
+#
+# Catppuccin Macchiato (dark)
+# [colors]
+# muted          = "#5b6078"
+# accent         = "#91d7e3"
+# cursor_bg      = "#8aadf4"
+# cursor_fg      = "#24273a"
+# highlight      = "#f5a97f"
+# error          = "#ed8796"
+# fallback_type  = "#b8c0e0"
+# type_url       = "#8aadf4"
+# type_file      = "#a6da95"
+# type_diag      = "#ed8796"
+# type_git       = "#eed49f"
+# type_sha       = "#f5a97f"
+# type_ipv4      = "#91d7e3"
+# type_ipv6      = "#7dc4e4"
+# type_uuid      = "#c6a0f6"
+# type_quoted    = "#b8c0e0"
+# type_command   = "#f5bde6"
+# type_secret    = "#ee99a0"
+#
+# Catppuccin Latte (light)
+# [colors]
+# muted          = "#acb0be"
+# accent         = "#04a5e5"
+# cursor_bg      = "#1e66f5"
+# cursor_fg      = "#eff1f5"
+# highlight      = "#df8e1d"
+# error          = "#d20f39"
+# fallback_type  = "#5c5f77"
+# type_url       = "#1e66f5"
+# type_file      = "#40a02b"
+# type_diag      = "#d20f39"
+# type_git       = "#df8e1d"
+# type_sha       = "#fe640b"
+# type_ipv4      = "#04a5e5"
+# type_ipv6      = "#209fb5"
+# type_uuid      = "#8839ef"
+# type_quoted    = "#6c6f85"
+# type_command   = "#ea76cb"
+# type_secret    = "#e64553"
+#
+# Tokyo Night
+# [colors]
+# muted          = "#565f89"
+# accent         = "#7dcfff"
+# cursor_bg      = "#7aa2f7"
+# cursor_fg      = "#1a1b26"
+# highlight      = "#e0af68"
+# error          = "#f7768e"
+# fallback_type  = "#9aa5ce"
+# type_url       = "#7aa2f7"
+# type_file      = "#9ece6a"
+# type_diag      = "#f7768e"
+# type_git       = "#e0af68"
+# type_sha       = "#ff9e64"
+# type_ipv4      = "#7dcfff"
+# type_ipv6      = "#2ac3de"
+# type_uuid      = "#bb9af7"
+# type_quoted    = "#9aa5ce"
+# type_command   = "#ff007c"
+# type_secret    = "#db4b4b"
+#
+# Gruvbox Dark
+# [colors]
+# muted          = "#928374"
+# accent         = "#8ec07c"
+# cursor_bg      = "#458588"
+# cursor_fg      = "#282828"
+# highlight      = "#d79921"
+# error          = "#cc241d"
+# fallback_type  = "#a89984"
+# type_url       = "#458588"
+# type_file      = "#98971a"
+# type_diag      = "#cc241d"
+# type_git       = "#d79921"
+# type_sha       = "#d65d0e"
+# type_ipv4      = "#689d6a"
+# type_ipv6      = "#8ec07c"
+# type_uuid      = "#b16286"
+# type_quoted    = "#a89984"
+# type_command   = "#d3869b"
+# type_secret    = "#fb4934"

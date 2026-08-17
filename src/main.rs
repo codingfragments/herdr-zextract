@@ -133,8 +133,14 @@ fn run() -> Result<(), String> {
         })
         .unwrap_or_default();
 
-    let selection = picker::run(matches, &custom_tags, config_missing, &initial_query)
-        .map_err(|e| format!("picker failed: {e}"))?;
+    let selection = picker::run(
+        matches,
+        &custom_tags,
+        config_missing,
+        &config.colors,
+        &initial_query,
+    )
+    .map_err(|e| format!("picker failed: {e}"))?;
     match selection {
         picker::PickerResult::Selected(matches, verb) => {
             let refs: Vec<&matcher::Match> = matches.iter().collect();

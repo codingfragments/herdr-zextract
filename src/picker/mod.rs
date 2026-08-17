@@ -11,8 +11,10 @@
 //! Scope: fuzzy-filter, `#type` include/exclude tokens, navigate,
 //! Input/List modes (`Tab` toggles - Input types into the query, List
 //! fires bare-letter verbs), multi-select (`Space`/`Ctrl-A`/`Ctrl-D`)
-//! with batch dispatch, and a dedicated footer/banner row. No preview
-//! pane or config-driven colors yet (Phase 8/9).
+//! with batch dispatch, a dedicated footer/banner row, and a
+//! config-driven `[colors]` theme (Phase 8). No preview pane yet
+//! (Phase 9) - `[ui].preview`/`[profiles.<name>].preview` are resolved
+//! in `main.rs` but have no rendering to act on yet.
 
 pub mod fuzzy;
 pub mod query;
@@ -34,36 +36,138 @@ use crate::matcher::{type_priority_bonus, Match, MatchType, TYPE_PRIORITY};
 use fuzzy::{FuzzyEngine, ScoredMatch};
 use query::ParsedQuery;
 
-const MUTED: Color = Color::DarkGray;
-const HIGHLIGHT: Color = Color::Yellow;
-const CURSOR_BG: Color = Color::Blue;
-const CURSOR_FG: Color = Color::Black;
+/// Resolved UI palette, built once from `[colors]` at picker startup.
+/// Every slot has an ANSI-palette default matching the original's
+/// `ColorsConfig::default` exactly; a config override replaces that
+/// slot's color outright, matched loosely against the original.
+struct Theme {
+    muted: Color,
+    accent: Color,
+    cursor_bg: Color,
+    cursor_fg: Color,
+    highlight: Color,
+    error: Color,
+    fallback_type: Color,
+    type_url: Color,
+    type_file: Color,
+    type_diag: Color,
+    type_git: Color,
+    type_sha: Color,
+    type_ipv4: Color,
+    type_ipv6: Color,
+    type_uuid: Color,
+    type_quoted: Color,
+    type_command: Color,
+    type_secret: Color,
+}
 
-/// Per-type list/tag colors, matching the original plugin's default
-/// theme (`ColorsConfig::default`) — hardcoded here until Phase 5 makes
-/// this configurable.
-fn color_for_type(ty: MatchType) -> Color {
-    match ty {
-        MatchType::Url => Color::Blue,
-        MatchType::File => Color::Green,
-        MatchType::Diagnostic => Color::LightRed,
-        MatchType::Git => Color::Yellow,
-        MatchType::Sha => Color::Yellow,
-        MatchType::Ipv4 => Color::Cyan,
-        MatchType::Ipv6 => Color::Cyan,
-        MatchType::Uuid => Color::Magenta,
-        MatchType::QuotedString => Color::Gray,
-        MatchType::Command => Color::LightMagenta,
-        MatchType::Secret => Color::LightRed,
+impl Theme {
+    fn resolve(colors: &crate::config::ColorsConfig) -> Self {
+        let c = |over: &Option<String>, default: Color| -> Color {
+            over.as_deref().and_then(parse_color).unwrap_or(default)
+        };
+        Self {
+            muted: c(&colors.muted, Color::DarkGray),
+            accent: c(&colors.accent, Color::Cyan),
+            cursor_bg: c(&colors.cursor_bg, Color::Blue),
+            cursor_fg: c(&colors.cursor_fg, Color::Black),
+            highlight: c(&colors.highlight, Color::Yellow),
+            error: c(&colors.error, Color::LightRed),
+            fallback_type: c(&colors.fallback_type, Color::Gray),
+            type_url: c(&colors.type_url, Color::Blue),
+            type_file: c(&colors.type_file, Color::Green),
+            type_diag: c(&colors.type_diag, Color::LightRed),
+            type_git: c(&colors.type_git, Color::Yellow),
+            type_sha: c(&colors.type_sha, Color::Yellow),
+            type_ipv4: c(&colors.type_ipv4, Color::Cyan),
+            type_ipv6: c(&colors.type_ipv6, Color::Cyan),
+            type_uuid: c(&colors.type_uuid, Color::Magenta),
+            type_quoted: c(&colors.type_quoted, Color::Gray),
+            type_command: c(&colors.type_command, Color::LightMagenta),
+            type_secret: c(&colors.type_secret, Color::LightRed),
+        }
+    }
+
+    fn color_for_type(&self, ty: MatchType) -> Color {
+        match ty {
+            MatchType::Url => self.type_url,
+            MatchType::File => self.type_file,
+            MatchType::Diagnostic => self.type_diag,
+            MatchType::Git => self.type_git,
+            MatchType::Sha => self.type_sha,
+            MatchType::Ipv4 => self.type_ipv4,
+            MatchType::Ipv6 => self.type_ipv6,
+            MatchType::Uuid => self.type_uuid,
+            MatchType::QuotedString => self.type_quoted,
+            MatchType::Command => self.type_command,
+            MatchType::Secret => self.type_secret,
+        }
+    }
+
+    /// Color for a `#tag` - a built-in type's own slot, or
+    /// `fallback_type` for a custom pattern name with no dedicated
+    /// slot (custom patterns are always tagged by name, not type).
+    fn color_for_tag(&self, tag: &str) -> Color {
+        TYPE_PRIORITY
+            .iter()
+            .find(|t| t.tag() == tag)
+            .map(|&t| self.color_for_type(t))
+            .unwrap_or(self.fallback_type)
     }
 }
 
-fn color_for_tag(tag: &str) -> Color {
-    TYPE_PRIORITY
-        .iter()
-        .find(|t| t.tag() == tag)
-        .map(|&t| color_for_type(t))
-        .unwrap_or(Color::Gray)
+/// Parses a `[colors]` value: an ANSI name, `#rrggbb` hex, or
+/// `rgb(r,g,b)`. Returns `None` on anything unrecognized, so a typo
+/// falls back to that slot's built-in default rather than failing.
+fn parse_color(s: &str) -> Option<Color> {
+    match s {
+        "black" => Some(Color::Black),
+        "dark_gray" => Some(Color::DarkGray),
+        "gray" => Some(Color::Gray),
+        "white" => Some(Color::White),
+        "red" => Some(Color::Red),
+        "green" => Some(Color::Green),
+        "yellow" => Some(Color::Yellow),
+        "blue" => Some(Color::Blue),
+        "magenta" => Some(Color::Magenta),
+        "cyan" => Some(Color::Cyan),
+        "light_red" => Some(Color::LightRed),
+        "light_green" => Some(Color::LightGreen),
+        "light_yellow" => Some(Color::LightYellow),
+        "light_blue" => Some(Color::LightBlue),
+        "light_magenta" => Some(Color::LightMagenta),
+        "light_cyan" => Some(Color::LightCyan),
+        _ => {
+            if let Some(hex) = s.strip_prefix('#') {
+                parse_hex(hex)
+            } else if let Some(inner) = s.strip_prefix("rgb(").and_then(|r| r.strip_suffix(')')) {
+                parse_rgb(inner)
+            } else {
+                None
+            }
+        }
+    }
+}
+
+fn parse_hex(hex: &str) -> Option<Color> {
+    if hex.len() != 6 {
+        return None;
+    }
+    let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+    let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+    let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+    Some(Color::Rgb(r, g, b))
+}
+
+fn parse_rgb(inner: &str) -> Option<Color> {
+    let parts: Vec<&str> = inner.split(',').map(str::trim).collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    let r = parts[0].parse::<u8>().ok()?;
+    let g = parts[1].parse::<u8>().ok()?;
+    let b = parts[2].parse::<u8>().ok()?;
+    Some(Color::Rgb(r, g, b))
 }
 
 /// Input mode types into the query; List mode fires bare-letter verbs
@@ -94,13 +198,17 @@ struct State {
     /// writing a config. `config_missing` stays true (the file still
     /// doesn't exist) but the banner stops showing.
     config_missing_dismissed: bool,
-    /// Transient status line, cleared on the next keystroke.
-    message: Option<String>,
+    /// Transient status line (text, is_error) - cleared on the next
+    /// keystroke. `is_error` picks `[colors].error` vs `.highlight`
+    /// when rendering, matching the original's "warning label" vs.
+    /// plain status-message use of those two slots.
+    message: Option<(String, bool)>,
     mode: Mode,
     /// Multi-selection: indices into `self.matches`, stable across
     /// filter changes (a row stays selected even when filtered out,
     /// and reappears already-selected when the filter brings it back).
     selected: HashSet<usize>,
+    theme: Theme,
 }
 
 impl State {
@@ -108,6 +216,7 @@ impl State {
         matches: Vec<Match>,
         custom_tags: Vec<String>,
         config_missing: bool,
+        colors: &crate::config::ColorsConfig,
         initial_query: &str,
     ) -> Self {
         let mut state = Self {
@@ -124,6 +233,7 @@ impl State {
             message: None,
             mode: Mode::Input,
             selected: HashSet::new(),
+            theme: Theme::resolve(colors),
         };
         state.refilter();
         state
@@ -278,9 +388,16 @@ pub fn run(
     matches: Vec<Match>,
     custom_tags: &[String],
     config_missing: bool,
+    colors: &crate::config::ColorsConfig,
     initial_query: &str,
 ) -> io::Result<PickerResult> {
-    let mut state = State::new(matches, custom_tags.to_vec(), config_missing, initial_query);
+    let mut state = State::new(
+        matches,
+        custom_tags.to_vec(),
+        config_missing,
+        colors,
+        initial_query,
+    );
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -319,7 +436,7 @@ fn try_fire(state: &mut State, verb: Verb) -> Option<PickerResult> {
             verb,
         )),
         Err(msg) => {
-            state.message = Some(msg);
+            state.message = Some((msg, true));
             None
         }
     }
@@ -349,10 +466,14 @@ fn run_loop(
                         match crate::config::write_default() {
                             Ok(path) => {
                                 state.config_missing = false;
-                                state.message =
-                                    Some(format!("wrote default config to {}", path.display()));
+                                state.message = Some((
+                                    format!("wrote default config to {}", path.display()),
+                                    false,
+                                ));
                             }
-                            Err(e) => state.message = Some(format!("failed to write config: {e}")),
+                            Err(e) => {
+                                state.message = Some((format!("failed to write config: {e}"), true))
+                            }
                         }
                     }
                     continue;
@@ -503,17 +624,24 @@ fn render_input(frame: &mut Frame, area: Rect, state: &State) {
     let mut spans = vec![
         Span::styled(
             "▍ ",
-            Style::default().fg(CURSOR_BG).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(state.theme.cursor_bg)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::raw(state.query.clone()),
-        Span::styled("█", Style::default().fg(MUTED).add_modifier(Modifier::DIM)),
+        Span::styled(
+            "█",
+            Style::default()
+                .fg(state.theme.muted)
+                .add_modifier(Modifier::DIM),
+        ),
         Span::raw("   "),
     ];
     for inc in &state.parsed_query.includes {
         spans.push(Span::styled(
             format!("[{inc}]"),
             Style::default()
-                .fg(color_for_tag(inc))
+                .fg(state.theme.color_for_tag(inc))
                 .add_modifier(Modifier::BOLD),
         ));
         spans.push(Span::raw(" "));
@@ -521,7 +649,9 @@ fn render_input(frame: &mut Frame, area: Rect, state: &State) {
     for exc in &state.parsed_query.excludes {
         spans.push(Span::styled(
             format!("[-{exc}]"),
-            Style::default().fg(MUTED).add_modifier(Modifier::DIM),
+            Style::default()
+                .fg(state.theme.muted)
+                .add_modifier(Modifier::DIM),
         ));
         spans.push(Span::raw(" "));
     }
@@ -535,7 +665,10 @@ fn render_input(frame: &mut Frame, area: Rect, state: &State) {
             state.matches.len()
         )
     };
-    spans.push(Span::styled(count_text, Style::default().fg(MUTED)));
+    spans.push(Span::styled(
+        count_text,
+        Style::default().fg(state.theme.muted),
+    ));
     spans.push(Span::raw("   "));
     let mode_tag = match state.mode {
         Mode::Input => "[INPUT]",
@@ -543,7 +676,9 @@ fn render_input(frame: &mut Frame, area: Rect, state: &State) {
     };
     spans.push(Span::styled(
         mode_tag,
-        Style::default().fg(MUTED).add_modifier(Modifier::DIM),
+        Style::default()
+            .fg(state.theme.muted)
+            .add_modifier(Modifier::DIM),
     ));
     let p = Paragraph::new(Line::from(spans)).block(
         Block::default()
@@ -556,14 +691,14 @@ fn render_input(frame: &mut Frame, area: Rect, state: &State) {
 fn render_list(frame: &mut Frame, area: Rect, state: &mut State) {
     if state.matches.is_empty() {
         let p = Paragraph::new("No matches in pane scrollback.")
-            .style(Style::default().fg(MUTED))
+            .style(Style::default().fg(state.theme.muted))
             .block(Block::default().borders(Borders::ALL));
         frame.render_widget(p, area);
         return;
     }
     if state.filtered.is_empty() {
         let p = Paragraph::new(format!("No matches for \"{}\"", state.query))
-            .style(Style::default().fg(MUTED))
+            .style(Style::default().fg(state.theme.muted))
             .block(Block::default().borders(Borders::ALL));
         frame.render_widget(p, area);
         return;
@@ -590,7 +725,9 @@ fn render_list(frame: &mut Frame, area: Rect, state: &mut State) {
             let gutter = if state.selected.contains(&s.index) {
                 Span::styled(
                     "* ",
-                    Style::default().fg(HIGHLIGHT).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(state.theme.accent)
+                        .add_modifier(Modifier::BOLD),
                 )
             } else {
                 Span::raw("  ")
@@ -599,13 +736,15 @@ fn render_list(frame: &mut Frame, area: Rect, state: &mut State) {
                 let title = truncate_display(m.source_pane_title().unwrap_or("?"), 15, false);
                 Span::styled(
                     format!("[{title}]  "),
-                    Style::default().fg(MUTED).add_modifier(Modifier::DIM),
+                    Style::default()
+                        .fg(state.theme.muted)
+                        .add_modifier(Modifier::DIM),
                 )
             });
             let pane_overhead = pane_span.as_ref().map_or(0, |s| s.content.chars().count());
             let tag_span = Span::styled(
                 format!("[{}]  ", m.effective_tag()),
-                Style::default().fg(color_for_type(m.ty)),
+                Style::default().fg(state.theme.color_for_type(m.ty)),
             );
             let tag_overhead = m.effective_tag().chars().count() + 8 + pane_overhead; // gutter(2) + "[tag]  "
             let avail = (area.width as usize).saturating_sub(tag_overhead);
@@ -619,7 +758,7 @@ fn render_list(frame: &mut Frame, area: Rect, state: &mut State) {
                 spans.push(ps);
             }
             spans.push(tag_span);
-            spans.extend(highlight_spans(&display, &s.indices, HIGHLIGHT));
+            spans.extend(highlight_spans(&display, &s.indices, state.theme.highlight));
             ListItem::new(Line::from(spans))
         })
         .collect();
@@ -628,8 +767,8 @@ fn render_list(frame: &mut Frame, area: Rect, state: &mut State) {
         .block(Block::default().borders(Borders::ALL))
         .highlight_style(
             Style::default()
-                .bg(CURSOR_BG)
-                .fg(CURSOR_FG)
+                .bg(state.theme.cursor_bg)
+                .fg(state.theme.cursor_fg)
                 .add_modifier(Modifier::BOLD),
         )
         .highlight_symbol("▸ ");
@@ -661,17 +800,22 @@ fn render_footer_or_banner(frame: &mut Frame, area: Rect, state: &State) {
         let p = Paragraph::new(lines).block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(HIGHLIGHT)),
+                .border_style(Style::default().fg(state.theme.highlight)),
         );
         frame.render_widget(p, area);
         return;
     }
-    if let Some(msg) = &state.message {
+    if let Some((msg, is_error)) = &state.message {
+        let color = if *is_error {
+            state.theme.error
+        } else {
+            state.theme.highlight
+        };
         let p = Paragraph::new(Line::from(vec![
             Span::raw(" "),
             Span::styled(
                 msg.clone(),
-                Style::default().fg(HIGHLIGHT).add_modifier(Modifier::BOLD),
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
             ),
         ]))
         .block(Block::default().borders(Borders::ALL));
@@ -683,7 +827,7 @@ fn render_footer_or_banner(frame: &mut Frame, area: Rect, state: &State) {
 
 fn render_footer(frame: &mut Frame, area: Rect, state: &State) {
     let bold = Style::default().add_modifier(Modifier::BOLD);
-    let dim = Style::default().fg(MUTED);
+    let dim = Style::default().fg(state.theme.muted);
 
     let mut line1: Vec<Span<'static>> = Vec::new();
     if let Some(m) = state.current_match() {
@@ -691,7 +835,7 @@ fn render_footer(frame: &mut Frame, area: Rect, state: &State) {
         line1.push(Span::styled(
             format!(" {}", m.effective_tag()),
             Style::default()
-                .fg(color_for_type(m.ty))
+                .fg(state.theme.color_for_type(m.ty))
                 .add_modifier(Modifier::BOLD),
         ));
         line1.push(Span::raw("  *  "));
@@ -798,4 +942,65 @@ fn highlight_spans(display: &str, indices: &[u32], color: Color) -> Vec<Span<'st
         spans.push(Span::styled(current, style));
     }
     spans
+}
+
+#[cfg(test)]
+mod color_tests {
+    use super::*;
+
+    #[test]
+    fn parse_color_recognizes_ansi_names() {
+        assert_eq!(parse_color("dark_gray"), Some(Color::DarkGray));
+        assert_eq!(parse_color("light_red"), Some(Color::LightRed));
+    }
+
+    #[test]
+    fn parse_color_recognizes_hex() {
+        assert_eq!(parse_color("#89b4fa"), Some(Color::Rgb(0x89, 0xb4, 0xfa)));
+    }
+
+    #[test]
+    fn parse_color_recognizes_rgb() {
+        assert_eq!(parse_color("rgb(10, 20, 30)"), Some(Color::Rgb(10, 20, 30)));
+    }
+
+    #[test]
+    fn parse_color_rejects_unknown() {
+        assert_eq!(parse_color("not-a-color"), None);
+        assert_eq!(parse_color("#zzzzzz"), None);
+        assert_eq!(parse_color("rgb(1,2)"), None);
+    }
+
+    #[test]
+    fn theme_resolve_uses_builtin_defaults_with_zero_config() {
+        let theme = Theme::resolve(&crate::config::ColorsConfig::default());
+        assert_eq!(theme.muted, Color::DarkGray);
+        assert_eq!(theme.color_for_type(MatchType::Url), Color::Blue);
+    }
+
+    #[test]
+    fn theme_resolve_applies_override() {
+        let colors = crate::config::ColorsConfig {
+            cursor_bg: Some("#7aa2f7".to_string()),
+            ..crate::config::ColorsConfig::default()
+        };
+        let theme = Theme::resolve(&colors);
+        assert_eq!(theme.cursor_bg, Color::Rgb(0x7a, 0xa2, 0xf7));
+    }
+
+    #[test]
+    fn theme_resolve_falls_back_on_unrecognized_override() {
+        let colors = crate::config::ColorsConfig {
+            highlight: Some("bogus".to_string()),
+            ..crate::config::ColorsConfig::default()
+        };
+        let theme = Theme::resolve(&colors);
+        assert_eq!(theme.highlight, Color::Yellow);
+    }
+
+    #[test]
+    fn color_for_tag_falls_back_to_fallback_type_for_custom_pattern() {
+        let theme = Theme::resolve(&crate::config::ColorsConfig::default());
+        assert_eq!(theme.color_for_tag("jira"), Color::Gray);
+    }
 }

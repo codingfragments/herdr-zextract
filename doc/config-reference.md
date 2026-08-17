@@ -270,3 +270,67 @@ define fall back to that name's built-in value, if one exists (e.g.
 `scrollback` source). An unrecognized name with no block at all falls
 back to `quick`, matching the original's "typos fall back to the first
 defined profile" behavior.
+
+---
+
+## `[colors]` — full UI palette override
+
+```toml
+[colors]
+cursor_bg = "#7aa2f7"   # Tokyo Night blue
+cursor_fg = "#1a1b26"   # Tokyo Night background
+```
+
+Every key is optional — omit the block entirely (or any individual
+key) to keep the built-in ANSI-palette default for that slot.
+
+### Color value format
+
+| Format | Example | Notes |
+|---|---|---|
+| ANSI name | `"dark_gray"` | `black`, `dark_gray`, `gray`, `white`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `light_red`, `light_green`, `light_yellow`, `light_blue`, `light_magenta`, `light_cyan` |
+| Hex | `"#rrggbb"` | Six-digit lowercase hex |
+| RGB | `"rgb(r,g,b)"` | Decimal 0–255 per channel |
+
+An unrecognized value falls back to that slot's built-in default
+rather than erroring.
+
+### UI chrome slots
+
+| Key | Default | Used for |
+|---|---|---|
+| `muted` | `"dark_gray"` | Gutters, hints, secondary text, empty-state messages |
+| `accent` | `"cyan"` | Selected-item `*` gutter |
+| `cursor_bg` | `"blue"` | List cursor row background |
+| `cursor_fg` | `"black"` | List cursor row foreground — must contrast `cursor_bg` |
+| `highlight` | `"yellow"` | Fuzzy-match character highlights, config-missing banner border, status messages |
+| `error` | `"light_red"` | Rejection/failure status messages (e.g. a refused batch action) |
+| `fallback_type` | `"gray"` | Color for a custom pattern with no dedicated `type_*` slot |
+
+### Type color slots
+
+Each slot controls the `[tag]` pill in the list.
+
+| Key | Default | Type tag |
+|---|---|---|
+| `type_url` | `"blue"` | `url` |
+| `type_file` | `"green"` | `file` |
+| `type_diag` | `"light_red"` | `diag` |
+| `type_git` | `"yellow"` | `git` |
+| `type_sha` | `"yellow"` | `sha` |
+| `type_ipv4` | `"cyan"` | `ipv4` |
+| `type_ipv6` | `"cyan"` | `ipv6` |
+| `type_uuid` | `"magenta"` | `uuid` |
+| `type_quoted` | `"gray"` | `quote` |
+| `type_command` | `"light_magenta"` | `cmd` |
+| `type_secret` | `"light_red"` | `secret` |
+
+### Theme presets
+
+Five complete presets — **Catppuccin Mocha**, **Catppuccin Macchiato**,
+**Catppuccin Latte** (light), **Tokyo Night**, and **Gruvbox Dark** —
+are included as commented blocks in
+[`config.example.toml`](../config.example.toml); uncomment one at a
+time. Not yet ported: preview-pane match-line highlighting doesn't
+exist yet (Phase 9), so `highlight`'s preview-related use from the
+original doesn't apply here yet either.
