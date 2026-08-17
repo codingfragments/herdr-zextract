@@ -99,9 +99,16 @@ flag_anchored = false
 # [grab_profiles.tab-scan]
 # disable = ["secret", "ipv6"]   # skip these only while this profile is active
 #
+# A wholly custom grab profile - any name not in the built-in five
+# (quick/deep/viewport/full/tab-scan) works the same way, selected by
+# a [profiles.<name>] block's `grab = "<name>"`. Deactivated (commented
+# out) by default; uncomment and bind it to a [profiles.*] block to
+# use it.
+#
 # [grab_profiles.jira-deep]
 # source = "scrollback"
 # lines = 500
+# disable = ["secret"]   # skip secrets only while this profile is active
 
 # [colors] — full UI palette override. Every key is optional; omit any
 # key (or the whole block) to keep the built-in ANSI-palette default

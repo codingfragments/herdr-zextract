@@ -238,7 +238,21 @@ lines = 3000
 [grab_profiles.jira-deep]
 source = "scrollback"
 lines = 500
+disable = ["secret"]
 ```
+
+`jira-deep` above is a wholly custom name — none of the built-in five
+(`quick`/`deep`/`viewport`/`full`/`tab-scan`) is named that. Defining a
+block under any new name is enough to make it a selectable grab
+profile; wire it up by pointing a `[profiles.<name>].grab` at it, e.g.
+
+```toml
+[profiles.custom0]
+grab = "jira-deep"
+```
+
+Commented out (deactivated) in `config.example.toml` by default —
+uncomment both blocks to use it.
 
 Don't confuse this with `[profiles.<name>]` above: that block only ever
 *selects* a grab profile by name (`grab = "deep"`); this block defines
