@@ -83,9 +83,8 @@ fn run() -> Result<(), String> {
         ),
     );
 
-    // Preview pane rendering itself is Phase 9 - resolved here anyway
-    // so `[ui].preview`/`[profiles.<name>].preview` are both exercised
-    // (and observable via log_level="debug") well before Phase 9 lands.
+    // Launch-time default for the picker's preview split - `[ui].preview`
+    // unless `[profiles.<name>].preview` overrides it for this keybind.
     let preview_open = config.resolve_preview_open(&profile);
     config.log(
         config::LogLevel::Debug,
@@ -104,7 +103,10 @@ fn run() -> Result<(), String> {
         ctx.focused_pane_id.clone(),
         ctx.tab_id.clone(),
     );
-    let (matches, _multi_pane) = grab_cycler
+    let grab::CaptureResult {
+        matches,
+        pane_texts,
+    } = grab_cycler
         .capture_current()
         .map_err(|e| format!("grab failed: {e}"))?;
     if matches.is_empty() {
@@ -124,14 +126,16 @@ fn run() -> Result<(), String> {
         })
         .unwrap_or_default();
 
-    let selection = picker::run(
+    let selection = picker::run(picker::LaunchArgs {
         matches,
-        &custom_tags,
+        pane_texts,
+        custom_tags: &custom_tags,
         config_missing,
-        &config,
-        &initial_query,
+        config: &config,
+        initial_query: &initial_query,
+        preview_open,
         grab_cycler,
-    )
+    })
     .map_err(|e| format!("picker failed: {e}"))?;
     match selection {
         picker::PickerResult::Selected(matches, verb) => {

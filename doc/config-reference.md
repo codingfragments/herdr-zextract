@@ -58,24 +58,37 @@ in the same file that failed to parse.
 ```toml
 [ui]
 preview = "off"                # default
-preview_open_width = "90%"     # default
+preview_open_width = "40%"     # default
 preview_closed_width = "70%"   # default
 ```
 
 | Key | Description |
 |---|---|
 | `preview` | Preview pane state at launch. `"off"` = closed (default), `"auto"` = closed (see note below), `"always"` = open. Overridden per keybind by `[profiles.<name>].preview` when set. |
-| `preview_open_width` | Popup width while the preview is open. Percent string or cell count. |
-| `preview_closed_width` | Popup width while the preview is closed. |
+| `preview_open_width` | The list column's width while the preview is open - a percent string (`"40%"`) or a bare cell count (`"120"`). The preview column takes whatever's left (60% by default). |
+| `preview_closed_width` | Has no effect (see note below). |
 
 **Note on `"auto"`:** the original remembers the previous session's
 open/closed state across launches. This port has no such persistence —
 each invocation is a fresh process with nothing to remember — so
 `"auto"` behaves identically to `"off"` here.
 
-The preview pane's actual *rendering* doesn't exist yet (see
-PLANNING.md §11 Phase 9); this block only adds the config surface that
-phase reads from.
+**Note on width and `preview_closed_width`:** the original resizes the
+*whole popup* wider when the preview opens (a real floating-pane
+resize). Herdr's popup pane is a fixed-size PTY set once at launch by
+`herdr-plugin.toml`, with no live-resize equivalent wired up here, so
+this port instead splits its own fixed render area into list+preview
+columns - `preview_open_width` sizes the list column of that split.
+`preview_closed_width` was the original's *closed* popup width; with
+no split at all when preview is closed, there's nothing for it to
+size, so it's accepted (parses without error) but otherwise ignored.
+
+Toggle the split with `p` (List mode) or `Ctrl-P` (either mode). The
+preview shows up to 3 lines before and after the highlighted match's
+line in the pane it came from, with the match's own line in
+`[colors].highlight` - and within that line, the exact extracted text
+picked out in `[colors].accent`, since a match is rarely the whole
+line.
 
 ---
 

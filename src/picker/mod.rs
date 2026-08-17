@@ -12,17 +12,20 @@
 //! Input/List modes (`Tab` toggles - Input types into the query, List
 //! fires bare-letter verbs), multi-select (`Space`/`Ctrl-A`/`Ctrl-D`)
 //! with batch dispatch, a dedicated footer/banner row, a config-driven
-//! `[colors]` theme (Phase 8), and live `Ctrl-G` cycling through every
+//! `[colors]` theme (Phase 8), live `Ctrl-G` cycling through every
 //! configured grab profile (re-captures + re-extracts in place via
-//! [`crate::grab::GrabCycler`], owned by [`State`] for the session).
-//! No preview pane yet (Phase 9) - `[ui].preview`/
-//! `[profiles.<name>].preview` are resolved in `main.rs` but have no
-//! rendering to act on yet.
+//! [`crate::grab::GrabCycler`], owned by [`State`] for the session), and
+//! a `p`/`Ctrl-P` preview split (Phase 9) showing ±3 lines of context
+//! around the highlighted match ([`preview::context_lines`]), sized by
+//! `[ui].preview_open_width` - see that module and
+//! `doc/config-reference.md` for why this port splits its own render
+//! area instead of resizing the real popup pane like the original does.
 
 pub mod fuzzy;
+pub mod preview;
 pub mod query;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io;
 
 use crossterm::event::{self, Event as CtEvent, KeyCode, KeyEventKind, KeyModifiers};
@@ -218,20 +221,29 @@ struct State {
     /// `Ctrl-G` cycles through this - re-captures and re-extracts with
     /// the next grab profile, refreshing `matches` in place.
     grab_cycler: crate::grab::GrabCycler,
+    /// Every contributing pane's full captured text, keyed by pane id -
+    /// the preview pane slices `context_lines` out of this using a
+    /// match's `__pane_id` field. Replaced wholesale on every regrab.
+    pane_texts: HashMap<String, String>,
+    /// `p` (List mode) / `Ctrl-P` (either mode) toggles this.
+    preview_open: bool,
 }
 
 impl State {
-    fn new(
-        matches: Vec<Match>,
-        custom_tags: Vec<String>,
-        config_missing: bool,
-        config: &crate::config::Config,
-        initial_query: &str,
-        grab_cycler: crate::grab::GrabCycler,
-    ) -> Self {
+    fn new(launch: LaunchArgs) -> Self {
+        let LaunchArgs {
+            matches,
+            pane_texts,
+            custom_tags,
+            config_missing,
+            config,
+            initial_query,
+            preview_open,
+            grab_cycler,
+        } = launch;
         let mut state = Self {
             matches,
-            custom_tags,
+            custom_tags: custom_tags.to_vec(),
             query: initial_query.to_string(),
             parsed_query: ParsedQuery::default(),
             fuzzy: FuzzyEngine::new(),
@@ -246,20 +258,24 @@ impl State {
             theme: Theme::resolve(&config.colors),
             config: config.clone(),
             grab_cycler,
+            pane_texts,
+            preview_open,
         };
         state.refilter();
         state
     }
 
     /// Re-capture and re-extract with the next grab profile in the
-    /// cycle (`Ctrl-G`), replacing `self.matches` and refiltering on
-    /// success. The multi-selection doesn't survive - a regrab can
-    /// wholly change which matches exist, so stale indices into the old
-    /// `matches` vector would silently select the wrong rows.
+    /// cycle (`Ctrl-G`), replacing `self.matches`/`self.pane_texts` and
+    /// refiltering on success. The multi-selection doesn't survive - a
+    /// regrab can wholly change which matches exist, so stale indices
+    /// into the old `matches` vector would silently select the wrong
+    /// rows.
     fn cycle_grab(&mut self) {
         match self.grab_cycler.cycle_next() {
-            Ok((matches, _multi_pane)) => {
-                self.matches = matches;
+            Ok(result) => {
+                self.matches = result.matches;
+                self.pane_texts = result.pane_texts;
                 self.selected.clear();
                 self.refilter();
                 self.message = Some((
@@ -414,28 +430,31 @@ pub enum PickerResult {
     Cancelled,
 }
 
-/// Run the picker over `matches` as a fullscreen terminal UI.
-/// `custom_tags` are the configured names of any custom patterns, so
-/// they resolve as `#name` filter tokens alongside the built-in types.
-/// `config_missing` shows the `Ctrl-W` "write starter config" hint.
-/// `initial_query` pre-fills the filter (e.g. `"#url"` for a
-/// per-keybind URL-only picker).
-pub fn run(
-    matches: Vec<Match>,
-    custom_tags: &[String],
-    config_missing: bool,
-    config: &crate::config::Config,
-    initial_query: &str,
-    grab_cycler: crate::grab::GrabCycler,
-) -> io::Result<PickerResult> {
-    let mut state = State::new(
-        matches,
-        custom_tags.to_vec(),
-        config_missing,
-        config,
-        initial_query,
-        grab_cycler,
-    );
+/// Bundled [`run`] parameters - plain positional args would put this
+/// past clippy's `too_many_arguments` threshold.
+pub struct LaunchArgs<'a> {
+    pub matches: Vec<Match>,
+    /// Every contributing pane's full captured text, keyed by pane id -
+    /// see [`State::pane_texts`].
+    pub pane_texts: HashMap<String, String>,
+    /// Configured names of any custom patterns, so they resolve as
+    /// `#name` filter tokens alongside the built-in types.
+    pub custom_tags: &'a [String],
+    /// Shows the `Ctrl-W` "write starter config" hint.
+    pub config_missing: bool,
+    pub config: &'a crate::config::Config,
+    /// Pre-fills the filter (e.g. `"#url"` for a per-keybind URL-only
+    /// picker).
+    pub initial_query: &'a str,
+    /// Launch-time state of the `p`/`Ctrl-P` preview split.
+    pub preview_open: bool,
+    pub grab_cycler: crate::grab::GrabCycler,
+}
+
+/// Run the picker as a fullscreen terminal UI - see [`LaunchArgs`] for
+/// what each field controls.
+pub fn run(launch: LaunchArgs) -> io::Result<PickerResult> {
+    let mut state = State::new(launch);
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -530,6 +549,10 @@ fn run_loop(
                 }
                 KeyCode::Char('g') => {
                     state.cycle_grab();
+                    continue;
+                }
+                KeyCode::Char('p') => {
+                    state.preview_open = !state.preview_open;
                     continue;
                 }
                 _ => {}
@@ -635,6 +658,8 @@ fn run_loop(
             Mode::List => {
                 if key.code == KeyCode::Char(' ') {
                     state.toggle_select_current();
+                } else if key.code == KeyCode::Char('p') {
+                    state.preview_open = !state.preview_open;
                 } else if let KeyCode::Char(c) = key.code {
                     if let Some(v) = actions::verb_from_char(c) {
                         if let Some(result) = try_fire(state, v) {
@@ -669,8 +694,91 @@ fn render(frame: &mut Frame, state: &mut State) {
 
     render_input(frame, top[0], state);
     render_grab_label(frame, top[1], state, &grab_label);
-    render_list(frame, chunks[1], state);
+
+    if state.preview_open {
+        // `[ui].preview_open_width` sizes the list column (matching its
+        // "popup width while the preview is open" doc wording, ported
+        // to an internal split since this port doesn't resize the real
+        // OS-level popup pane); the preview takes whatever's left.
+        // `preview_closed_width` has no effect - closed means no split
+        // at all, so there's nothing for it to size.
+        let list_width = width_constraint(&state.config.ui.preview_open_width, 40);
+        let middle = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([list_width, Constraint::Min(1)])
+            .split(chunks[1]);
+        render_list(frame, middle[0], state);
+        render_preview(frame, middle[1], state);
+    } else {
+        render_list(frame, chunks[1], state);
+    }
+
     render_footer_or_banner(frame, chunks[2], state);
+}
+
+/// Parses a `[ui].preview_*_width`-style value: `"90%"` or a bare cell
+/// count (`"120"`). Falls back to `Constraint::Percentage(default_pct)`
+/// on anything else, including an out-of-range percentage.
+fn width_constraint(s: &str, default_pct: u16) -> Constraint {
+    if let Some(pct) = s.trim().strip_suffix('%') {
+        return pct
+            .trim()
+            .parse::<u16>()
+            .ok()
+            .filter(|&p| p <= 100)
+            .map(Constraint::Percentage)
+            .unwrap_or(Constraint::Percentage(default_pct));
+    }
+    s.trim()
+        .parse::<u16>()
+        .ok()
+        .map(Constraint::Length)
+        .unwrap_or(Constraint::Percentage(default_pct))
+}
+
+/// ±3 lines of context around the highlighted match's source line,
+/// current line picked out in `theme.highlight`. Shows a muted
+/// placeholder instead when there's no highlighted match or its source
+/// pane text isn't available.
+fn render_preview(frame: &mut Frame, area: Rect, state: &State) {
+    let block = Block::default().borders(Borders::ALL).title("preview");
+    let Some(m) = state.current_match() else {
+        let p = Paragraph::new("no selection")
+            .style(Style::default().fg(state.theme.muted))
+            .block(block);
+        frame.render_widget(p, area);
+        return;
+    };
+    let Some(ctx) = preview::context_lines(m, &state.pane_texts) else {
+        let p = Paragraph::new("no context available")
+            .style(Style::default().fg(state.theme.muted))
+            .block(block);
+        frame.render_widget(p, area);
+        return;
+    };
+    let lines: Vec<Line> = ctx
+        .lines
+        .iter()
+        .enumerate()
+        .map(|(i, line)| {
+            if i == ctx.current {
+                let base = Style::default()
+                    .fg(state.theme.highlight)
+                    .add_modifier(Modifier::BOLD);
+                let span_style = Style::default()
+                    .fg(state.theme.accent)
+                    .add_modifier(Modifier::BOLD);
+                Line::from(split_at_span(line, ctx.span_chars, base, span_style))
+            } else {
+                Line::from(Span::styled(
+                    line.to_string(),
+                    Style::default().fg(state.theme.muted),
+                ))
+            }
+        })
+        .collect();
+    let p = Paragraph::new(lines).block(block);
+    frame.render_widget(p, area);
 }
 
 /// `grab:<name>` plus the resolved line cap, except for `viewport` -
@@ -935,6 +1043,11 @@ fn render_footer(frame: &mut Frame, area: Rect, state: &State) {
             line1.push(Span::raw(":export  "));
             line1.push(Span::styled("Space", bold));
             line1.push(Span::raw(":select  "));
+            line1.push(Span::styled("p", bold));
+            line1.push(Span::raw(format!(
+                ":{}preview  ",
+                if state.preview_open { "hide " } else { "" }
+            )));
         }
     } else {
         line1.push(Span::raw(" "));
@@ -956,7 +1069,9 @@ fn render_footer(frame: &mut Frame, area: Rect, state: &State) {
         line2.push(Span::styled("Ctrl-D", bold));
         line2.push(Span::raw(":select all/none    "));
         line2.push(Span::styled("Ctrl-G", bold));
-        line2.push(Span::raw(":next grabber"));
+        line2.push(Span::raw(":next grabber    "));
+        line2.push(Span::styled("Ctrl-P", bold));
+        line2.push(Span::raw(":preview"));
     } else {
         line2.push(Span::styled(
             format!("{} selected", state.selected.len()),
@@ -989,6 +1104,44 @@ fn truncate_display(s: &str, max_chars: usize, middle: bool) -> String {
         let truncated: String = chars[..max_chars - 1].iter().collect();
         format!("{truncated}…")
     }
+}
+
+/// Splits `line` into up to 3 spans around the char-index range
+/// `span_chars`: `base` style everywhere, `span_style` for the range
+/// itself. Used by [`render_preview`] to pick the exact extracted
+/// finding out of its already-highlighted current line - an empty or
+/// out-of-range `span_chars` (`start >= end`) just returns `line`
+/// entirely in `base`.
+fn split_at_span(
+    line: &str,
+    span_chars: (usize, usize),
+    base: Style,
+    span_style: Style,
+) -> Vec<Span<'static>> {
+    let (start, end) = span_chars;
+    if start >= end {
+        return vec![Span::styled(line.to_string(), base)];
+    }
+    let chars: Vec<char> = line.chars().collect();
+    let start = start.min(chars.len());
+    let end = end.min(chars.len());
+    let mut spans = Vec::new();
+    if start > 0 {
+        spans.push(Span::styled(
+            chars[..start].iter().collect::<String>(),
+            base,
+        ));
+    }
+    if end > start {
+        spans.push(Span::styled(
+            chars[start..end].iter().collect::<String>(),
+            span_style,
+        ));
+    }
+    if end < chars.len() {
+        spans.push(Span::styled(chars[end..].iter().collect::<String>(), base));
+    }
+    spans
 }
 
 /// Ported from the original `main.rs::highlight_spans` verbatim.
@@ -1103,7 +1256,16 @@ mod grab_label_tests {
             "pane1".to_string(),
             "tab1".to_string(),
         );
-        State::new(Vec::new(), Vec::new(), false, &config, "", grab_cycler)
+        State::new(LaunchArgs {
+            matches: Vec::new(),
+            pane_texts: HashMap::new(),
+            custom_tags: &[],
+            config_missing: false,
+            config: &config,
+            initial_query: "",
+            preview_open: false,
+            grab_cycler,
+        })
     }
 
     #[test]
@@ -1119,5 +1281,84 @@ mod grab_label_tests {
     #[test]
     fn omits_line_cap_for_viewport() {
         assert_eq!(grab_label_text(&state_at("viewport")), "grab:viewport");
+    }
+}
+
+#[cfg(test)]
+mod width_constraint_tests {
+    use super::*;
+
+    #[test]
+    fn parses_percent() {
+        assert_eq!(width_constraint("90%", 70), Constraint::Percentage(90));
+    }
+
+    #[test]
+    fn parses_bare_cell_count() {
+        assert_eq!(width_constraint("120", 70), Constraint::Length(120));
+    }
+
+    #[test]
+    fn falls_back_on_out_of_range_percent() {
+        assert_eq!(width_constraint("150%", 70), Constraint::Percentage(70));
+    }
+
+    #[test]
+    fn falls_back_on_garbage() {
+        assert_eq!(width_constraint("nonsense", 70), Constraint::Percentage(70));
+    }
+
+    #[test]
+    fn trims_surrounding_whitespace() {
+        assert_eq!(width_constraint(" 90% ", 70), Constraint::Percentage(90));
+    }
+}
+
+#[cfg(test)]
+mod split_at_span_tests {
+    use super::*;
+
+    fn plain(text: &str) -> Span<'static> {
+        Span::styled(text.to_string(), Style::default())
+    }
+
+    #[test]
+    fn splits_around_a_middle_span() {
+        let base = Style::default();
+        let span_style = Style::default().add_modifier(Modifier::BOLD);
+        let spans = split_at_span("see https://x.com end", (4, 17), base, span_style);
+        assert_eq!(spans.len(), 3);
+        assert_eq!(spans[0].content, "see ");
+        assert_eq!(spans[1].content, "https://x.com");
+        assert_eq!(spans[1].style, span_style);
+        assert_eq!(spans[2].content, " end");
+    }
+
+    #[test]
+    fn span_at_the_very_start_has_no_leading_segment() {
+        let spans = split_at_span("abc", (0, 1), Style::default(), Style::default());
+        assert_eq!(spans.len(), 2);
+        assert_eq!(spans[0].content, "a");
+        assert_eq!(spans[1].content, "bc");
+    }
+
+    #[test]
+    fn span_at_the_very_end_has_no_trailing_segment() {
+        let spans = split_at_span("abc", (2, 3), Style::default(), Style::default());
+        assert_eq!(spans.len(), 2);
+        assert_eq!(spans[0].content, "ab");
+        assert_eq!(spans[1].content, "c");
+    }
+
+    #[test]
+    fn empty_span_returns_whole_line_unstyled_by_span_style() {
+        let spans = split_at_span("abc", (0, 0), Style::default(), Style::default());
+        assert_eq!(spans, vec![plain("abc")]);
+    }
+
+    #[test]
+    fn out_of_range_span_is_treated_as_empty() {
+        let spans = split_at_span("abc", (5, 2), Style::default(), Style::default());
+        assert_eq!(spans, vec![plain("abc")]);
     }
 }

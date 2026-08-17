@@ -8,7 +8,7 @@
 //! non-floating, non-plugin pane on the active tab" reduces to simply
 //! every pane `pane.list` returns for that tab, no extra filtering.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::config::Config;
 use crate::matcher::{self, Match};
@@ -159,7 +159,7 @@ impl GrabCycler {
     /// Capture + extract with the grabber the cycle currently points
     /// at, used for the picker's initial load so `main.rs` doesn't
     /// duplicate the multi-pane/`__pane_id` handling done here.
-    pub fn capture_current(&self) -> Result<(Vec<Match>, bool), String> {
+    pub fn capture_current(&self) -> Result<CaptureResult, String> {
         self.capture_and_extract(self.current)
     }
 
@@ -167,14 +167,14 @@ impl GrabCycler {
     /// around), advancing `current` only on success - a socket failure
     /// leaves the picker's existing matches and displayed grabber name
     /// untouched rather than clearing the list.
-    pub fn cycle_next(&mut self) -> Result<(Vec<Match>, bool), String> {
+    pub fn cycle_next(&mut self) -> Result<CaptureResult, String> {
         let next = (self.current + 1) % self.names.len();
         let result = self.capture_and_extract(next)?;
         self.current = next;
         Ok(result)
     }
 
-    fn capture_and_extract(&self, index: usize) -> Result<(Vec<Match>, bool), String> {
+    fn capture_and_extract(&self, index: usize) -> Result<CaptureResult, String> {
         let profile = &self.profiles[index];
         let captures = capture(
             profile,
@@ -186,20 +186,39 @@ impl GrabCycler {
         let mut config = self.config_template.clone();
         config.disabled = self.disabled_sets[index].clone();
         let mut matches = Vec::new();
+        let mut pane_texts = HashMap::new();
         for cap in &captures {
             let mut found = matcher::extract_with_config(&cap.text, &config);
-            if multi_pane {
-                for m in &mut found {
-                    m.fields
-                        .insert("__pane_id".to_string(), cap.pane_id.clone());
+            // `__pane_id` is always set (not just in multi-pane mode) -
+            // the preview pane needs it to find a match's source text
+            // regardless of how many panes contributed. `__pane_title`
+            // stays multi-pane-only; it only ever drives the list's
+            // `[title]` prefix, which is itself multi-pane-only.
+            for m in &mut found {
+                m.fields
+                    .insert("__pane_id".to_string(), cap.pane_id.clone());
+                if multi_pane {
                     m.fields
                         .insert("__pane_title".to_string(), cap.title.clone());
                 }
             }
             matches.extend(found);
+            pane_texts.insert(cap.pane_id.clone(), cap.text.clone());
         }
-        Ok((matches, multi_pane))
+        Ok(CaptureResult {
+            matches,
+            pane_texts,
+        })
     }
+}
+
+/// One capture+extract cycle's result: the matches found, plus every
+/// contributing pane's full captured text (keyed by pane id) - kept
+/// around so the preview pane can slice ±3 lines of context around a
+/// match's byte offset without re-reading the pane.
+pub struct CaptureResult {
+    pub matches: Vec<Match>,
+    pub pane_texts: HashMap<String, String>,
 }
 
 /// Capture scrollback per `profile`. `focused_pane_id`/`tab_id` come

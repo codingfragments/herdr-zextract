@@ -12,8 +12,8 @@ id = "zextract"
 title = "zextract"
 command = ["./target/release/herdr-zextract"]
 placement = "popup"
-width = "70%"
-height = "70%"
+width = "80%"
+height = "80%"
 
 # Launcher actions: each is a thin invocation of `herdr plugin pane
 # open` for the "zextract" pane above, selecting a named *profile* via
