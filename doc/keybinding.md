@@ -18,12 +18,12 @@ live in **your own** `config.toml`, not here — see
 
 Four have built-in defaults, so they work with zero config:
 
-| Action id          | Profile name | Grab scope    | Pattern filter        |
-| ------------------- | ------------ | -------------- | ---------------------- |
-| `zextract-open`     | `open`       | current pane   | all types               |
-| `zextract-tab`      | `tab`        | whole tab       | all types               |
-| `zextract-url`      | `url`        | current pane   | `url`, `ipv4`, `ipv6`   |
-| `zextract-url-tab`  | `url-tab`    | whole tab       | `url`, `ipv4`, `ipv6`   |
+| Action id          | Profile name | Grab scope    | Pattern filter        | Preview |
+| ------------------- | ------------ | -------------- | ---------------------- | ------- |
+| `zextract-open`     | `open`       | current pane   | all types               | off (`[ui].preview` default) |
+| `zextract-tab`      | `tab`        | whole tab       | all types               | off (`[ui].preview` default) |
+| `zextract-url`      | `url`        | current pane   | `url`, `ipv4`, `ipv6`   | on |
+| `zextract-url-tab`  | `url-tab`    | whole tab       | `url`, `ipv4`, `ipv6`   | on |
 
 Loosely mirrors the original `zellij-zextract` plugin's current-pane/
 whole-tab, all-types/URL-only split (lowercase = current pane,

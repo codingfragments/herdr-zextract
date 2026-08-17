@@ -231,6 +231,10 @@ built-in Rust-side defaults matching the four actions
 keybinds work with no config file at all. Defining `[profiles.open]`
 (etc.) here replaces that built-in entirely — it doesn't merge with
 it, so restate every key you want, not just the one you're changing.
+`url`/`url-tab`'s built-in default also sets `preview = "on"` - a URL
+match is short, so the preview's context is cheap to show; `open`/`tab`
+stay on `[ui].preview`'s own default (`"off"`). Restate `preview` in
+your own override if you want different behavior.
 
 **Custom profiles:** `herdr-plugin.toml` also ships ten unbound slots,
 `custom0` through `custom9`, with no built-in default — undefined ones
