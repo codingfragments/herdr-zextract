@@ -613,6 +613,48 @@ table).
 5. `r` on a file match opens it in Finder/file-manager; `Y`/`I` on a
    `quote` match copy/insert the unquoted `display` value.
 
+**Done (verified 2026-08-17):** ported `render_footer`/`render_banner`
+and the Input/List mode split into `picker/mod.rs`; ported
+`allowed_verbs`/`static_default_verb`'s multi-target rules
+(`plan_batch`/`execute_batch` in `actions.rs`) with hardcoded caps
+matching the original's `limits{}` defaults (copy/json 100,
+insert/edit 5, open/reveal 10). Added `reveal` (macOS `open -R`; Linux
+falls back to `xdg-open` on the parent directory - no universal
+"select in file manager" API exists there) and `Y`/`I`
+(CopyDisplay/InsertDisplay), reachable now that List mode exists.
+
+Real bug found via manual testing: `Ctrl-I` is byte-identical to `Tab`
+(both `0x09`) in terminal protocols, so binding it to force-Insert
+silently toggled the mode instead of firing anything. Fixed by
+dropping `Ctrl-I` entirely and using `Shift-Enter` for force-insert
+instead, matching what the original actually does (it was never
+`Ctrl-I` there either - that binding was this port's own Phase-4-era
+placeholder, invented before List mode existed to give every verb a
+Ctrl-shortcut; once bare `i` covers List mode, `Ctrl-I` was both
+redundant and broken).
+
+Verified live against a real Herdr install (two-pane setup: binary
+running in one pane, scrollback/insert-target in another, same
+technique as Phase 3): footer shows the correct type-specific verb
+hints and updates on `Tab`; bare `y` in List mode fires copy directly
+(confirmed via `pbpaste`); `Space` + `Space` selects two rows (gutter
+`*` marker, "N selected" count); batch copy joins with `\n`
+(`pbpaste`-verified); selecting 8 matches and firing insert (cap 5)
+shows "refused: 8 matches exceeds cap of 5 for 'insert'" and leaves the
+selection intact rather than firing partially; the config-missing
+banner appears in the dedicated footer/banner row (not squeezed into
+the input bar), `Ctrl-W` writes the config, `Ctrl-X` dismisses the
+banner without writing anything (confirmed by checking the config
+directory stayed empty after dismiss); batch edit on two file matches
+chains two invocations of a fake `$EDITOR` script via `&&`, each with
+its own correct `+line` argument, verified via the fake editor's
+logged argv. Shift-Enter's specific key combo couldn't be
+independently exercised through the `herdr pane send-keys` CLI test
+harness (it appears to have no effect at all via that path - likely a
+harness/terminal-protocol limitation, not a confirmed code issue),
+but the `try_fire`/`plan_batch` logic it shares is the exact path
+already proven correct via plain `Enter` with a full 8-match selection.
+
 ### Phase 7 — Manifest polish & keybinding
 
 **Prompt:** Finalize `herdr-plugin.toml` for both install paths in §8

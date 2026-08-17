@@ -64,10 +64,13 @@ fn run() -> Result<(), String> {
     let selection = picker::run(matches, &custom_tags, config_missing)
         .map_err(|e| format!("picker failed: {e}"))?;
     match selection {
-        picker::PickerResult::Selected(m, verb) => match actions::dispatch(verb, &m, &pane_id) {
-            actions::Outcome::Done(msg) => println!("{msg}"),
-            actions::Outcome::Failed(msg) => println!("error: {msg}"),
-        },
+        picker::PickerResult::Selected(matches, verb) => {
+            let refs: Vec<&matcher::Match> = matches.iter().collect();
+            match actions::execute_batch(verb, &refs, &pane_id) {
+                actions::Outcome::Done(msg) => println!("{msg}"),
+                actions::Outcome::Failed(msg) => println!("error: {msg}"),
+            }
+        }
         picker::PickerResult::Cancelled => println!("(cancelled)"),
     }
     Ok(())
