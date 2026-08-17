@@ -253,22 +253,219 @@ herdr-zextract/
 └── README.md
 ```
 
-## 11. Milestones
+## 11. Implementation phases
 
-1. **Spike**: minimal socket client that can do `pane.read` and print
-   scrollback of the focused pane — validates the socket protocol
-   assumptions in this doc against a real Herdr instance.
-2. **Port matcher engine**: bring over pattern definitions + regex engine,
-   unit tests passing standalone (no host needed).
-3. **Port picker UI**: wire matcher output into the existing `ratatui`
-   picker, running as a normal terminal binary (no herdr integration yet)
-   for fast iteration.
-4. **Wire up socket actions**: insert/copy/open/edit/export via the socket
-   client + `arboard` + `std::process::Command`.
-5. **Manifest + first end-to-end run** inside real Herdr popup pane.
-6. **CI**: `ci.yml` first, then `release.yml`, cut `v0.1.0`.
-7. **Docs**: update README install section from "planned" to real
-   instructions once `v0.1.0` exists.
+Superseded the original horizontal milestone list (matcher-then-UI-then-
+host-wiring) once §12 unblocked real Herdr testing. Each phase below is a
+**vertical slice**: it runs as a real popup inside a real Herdr session
+and produces an observable result end-to-end, even though most of the
+feature set is still stubbed. Each phase is one `phase/<slug>` branch/PR
+per the gitflow in `CLAUDE.md`, merged before the next phase starts.
+
+When starting a phase, open it with the "Prompt" text below verbatim (it
+carries the goal and scope so a fresh session doesn't need the rest of
+this document to get oriented) and don't consider the phase done until
+its manual test plan passes against a real Herdr install.
+
+### Phase 1 — Socket client + raw popup echo
+
+**Prompt:** Build the smallest possible `herdr-zextract` binary and
+manifest that proves the popup-and-socket plumbing works end-to-end: on
+launch, read `HERDR_PLUGIN_CONTEXT_JSON` for `focused_pane_id`, call
+`pane.read` over `$HERDR_SOCKET_PATH` with `source = recent_unwrapped`,
+and print the raw scrollback text into the popup pane (no matching, no
+picker, no ratatui yet — just prove the pipes connect). Write
+`herdr-plugin.toml` with a `[[panes]]` popup entry and a `[[build]]`
+step (`cargo build --release`), per §8. Keep the socket client
+hand-rolled (`UnixStream`, newline-delimited JSON) per §6 — no async
+runtime.
+
+**Scope:** `socket_client.rs` (connect, one request/response round trip),
+`main.rs` reading context env + printing result, minimal manifest.
+
+**Out of scope:** matcher, picker UI, actions, config file, keybinding
+(`herdr plugin pane open` from the CLI is an acceptable trigger for this
+phase — real keybinding wiring is Phase 6).
+
+**Manual test plan:**
+1. `cargo build --release`.
+2. `herdr plugin link .` from the repo root.
+3. Focus any pane with some scrollback text, then trigger the plugin
+   pane (`herdr plugin pane open --plugin <id> --entrypoint <id>
+   --placement popup`).
+4. Confirm the popup shows the scrollback of the pane that was focused
+   *before* the popup opened, not the popup's own (empty) buffer.
+5. `herdr plugin unlink <id>` when done.
+
+### Phase 2 — Matcher engine, wired to real scrollback
+
+**Prompt:** Port the original plugin's pattern-matching engine
+(`doc/patterns.md`'s built-in regex set) into `matcher/`, with unit
+tests that run standalone (no Herdr needed). Then wire it into the
+Phase 1 binary: instead of dumping raw scrollback, run the matcher over
+it and print the resulting match list (type + matched text + line) as
+plain text in the popup.
+
+**Scope:** `matcher/` module + unit tests, `main.rs` updated to run
+matches over the `pane.read` result and print them.
+
+**Out of scope:** picker UI (still plain text output), actions,
+user-defined/custom patterns (built-ins only for now).
+
+**Manual test plan:**
+1. `cargo test` — matcher unit tests pass standalone.
+2. In a real pane, produce scrollback with a URL, a file path, and a
+   UUID (e.g. `echo https://example.com ./src/main.rs
+   $(uuidgen)`).
+3. Trigger the popup as in Phase 1's test plan.
+4. Confirm the popup lists all three matches with correct type labels,
+   and ignores unrelated scrollback lines.
+
+### Phase 3 — Picker UI
+
+**Prompt:** Wire the Phase 2 match list into the original plugin's
+`ratatui` picker UI (ported ~as-is per §4/§6 — it's host-agnostic). The
+picker should support fuzzy-filtering the match list interactively.
+Selecting a match should, for now, just print the selected match to
+the popup and exit — no action execution yet (that's Phase 4).
+
+**Scope:** `picker/` module (ported ratatui/crossterm UI), `main.rs`
+driving it off the Phase 2 matcher output.
+
+**Out of scope:** actions (open/edit/copy/insert/export), type-aware
+action menu — selection just echoes the pick for now.
+
+**Manual test plan:**
+1. Trigger the popup against scrollback with several distinct match
+   types.
+2. Type a fuzzy filter substring and confirm the list narrows correctly.
+3. Navigate with arrow keys, press Enter on a match, confirm the popup
+   prints that exact match and closes cleanly (no hang, no zombie
+   process — check with `ps` that the plugin process exits).
+4. Press Esc/Ctrl-C and confirm the picker closes without error.
+
+### Phase 4 — Actions
+
+**Prompt:** Replace Phase 3's "print selection" with the real
+type-aware action menu and action execution: **open** (URL via
+`open`/`xdg-open`), **edit** (file via `$EDITOR`, at the matched line if
+available), **copy** (`arboard` clipboard), **insert** (`pane.send_input`
+back into the *source* pane captured from `focused_pane_id`), **export**
+(write the current match set as JSON to stdout or a file). Keep
+platform-specific bits behind a small trait in `actions.rs` per §7 so
+matcher/UI stay platform-agnostic.
+
+**Scope:** `actions.rs`, action-menu UI in `picker/`, `pane.send_input`
+usage in `socket_client.rs`.
+
+**Out of scope:** user config for action bindings, custom patterns —
+still built-in patterns and a fixed action set per match type
+(`doc/types.md`'s original mapping).
+
+**Manual test plan:** for each action, trigger the popup, pick a
+matching match type, and verify the concrete effect:
+1. **open** — a URL match opens in the default browser.
+2. **edit** — a file-path match (with a line number, e.g. a diagnostic)
+   opens `$EDITOR` at that file/line.
+3. **copy** — after picking copy, `pbpaste` (macOS) / clipboard tool
+   (Linux) shows the matched text.
+4. **insert** — after picking insert, the source pane (the one that was
+   focused before the popup opened) receives the matched text as input.
+5. **export** — the exported JSON file/stdout contains the expected
+   match objects (type, text, line if applicable).
+
+### Phase 5 — User config & custom patterns
+
+**Prompt:** Port `doc/config-reference.md`'s config schema: a config
+file under `$HERDR_PLUGIN_CONFIG_DIR` that lets users add custom regex
+patterns and adjust built-in pattern behavior, loaded at plugin startup
+alongside the built-ins from Phase 2.
+
+**Scope:** config file parsing/schema, merge logic with built-in
+patterns, `doc/config-reference.md` ported/updated for Herdr paths.
+
+**Out of scope:** live config reload while the popup is open (config is
+read once per invocation, matching the original's snapshot-once model
+per §13).
+
+**Manual test plan:**
+1. Add a custom pattern to the config file under
+   `$(herdr plugin config-dir <id>)`.
+2. Produce scrollback matching only the custom pattern.
+3. Trigger the popup and confirm the custom match appears with the
+   configured type/action set.
+4. Remove/break the config file and confirm the plugin still runs
+   correctly against just the built-ins (no crash on missing config).
+
+### Phase 6 — Manifest polish & keybinding
+
+**Prompt:** Finalize `herdr-plugin.toml` for both install paths in §8
+(Option A's `[[build]]`-driven install, Option B's `cargo install`
+minimal manifest), and wire a real Herdr keybind (`[[actions]]` in the
+manifest, per the schema found in Phase 1's investigation) so the
+plugin launches via keypress against whatever pane is focused, not just
+via `herdr plugin pane open` from the CLI.
+
+**Scope:** final manifest shape, README's "Option A/B" install
+instructions validated against both paths.
+
+**Out of scope:** CI/release automation (Phase 7).
+
+**Manual test plan:**
+1. `herdr plugin link .`, bind a key to the plugin action in Herdr
+   config, reload config.
+2. From an arbitrary pane with scrollback, press the bound key.
+3. Confirm the popup opens targeting that pane (not whatever was
+   focused when the plugin was linked).
+4. Repeat via `herdr plugin install <owner>/<repo>` against a pushed
+   branch, confirming the `[[build]]` step actually compiles before
+   registration (per §8's "not automatic build detection" note).
+
+### Phase 7 — CI & first release
+
+**Prompt:** Write `.github/workflows/ci.yml` (`cargo fmt --check`,
+`cargo clippy -- -D warnings`, `cargo test` on macOS + Linux runners)
+and `.github/workflows/release.yml` per §9, including the native
+`ubuntu-24.04-arm` runner for `aarch64-unknown-linux-gnu` confirmed in
+§12 (no `cross`/QEMU). Cut `v0.1.0` once picker + matcher + actions
+parity with the original is manually verified on both a Mac and a Linux
+box.
+
+**Scope:** both workflow files, version bump to `0.1.0` +
+`CHANGELOG.md` entry via the release-PR flow in `CLAUDE.md`.
+
+**Out of scope:** Option C's prebuilt-binary `install.sh` (stretch,
+§8).
+
+**Manual test plan:**
+1. Open a PR touching `src/` — confirm `ci.yml` runs and passes on both
+   OSes.
+2. Merge the release PR, tag `v0.1.0`, push the tag.
+3. Confirm `release.yml` runs, produces all four target-triple archives
+   + `.sha256` files, and attaches them to the GitHub release.
+4. On a clean machine per target triple (or at least one Mac + one
+   Linux box), download the release asset and confirm the binary runs.
+
+### Phase 8 — Docs pass
+
+**Prompt:** Update `README.md`'s install section from "planned" to the
+real, tested instructions now that `v0.1.0` exists, and port/update
+`doc/patterns.md`, `doc/config-reference.md`, `doc/use-cases.md`,
+`doc/types.md` from the original repo for Herdr's paths/env vars
+(`HERDR_PLUGIN_CONFIG_DIR` etc. instead of the original's Zellij config
+location).
+
+**Scope:** README + `doc/` updates only, no code changes.
+
+**Out of scope:** anything not already shipped in v0.1.0 — docs
+describe what exists, not aspirational features.
+
+**Manual test plan:**
+1. On a machine with no prior state, follow README's install
+   instructions verbatim (both Option A and Option B) and confirm each
+   works as written.
+2. Follow each `doc/use-cases.md` walkthrough manually and confirm the
+   described behavior matches what actually happens.
 
 ## 12. Open questions (resolved 2026-08-17)
 
