@@ -83,10 +83,9 @@ pane, plugin registration/keybinding.
 └───────────────────────────────────────────────┘
 ```
 
-The plugin context (`HERDR_PLUGIN_CONTEXT_JSON`) is expected to carry the
-originating pane/tab/workspace id at launch time — needs verification
-against real Herdr plugin context payloads once the plugin API stabilizes
-(tracked in [§8 Open questions](#8-open-questions)).
+The plugin context (`HERDR_PLUGIN_CONTEXT_JSON`) carries the originating
+pane/tab/workspace id at launch time as `focused_pane_id` — confirmed
+against a real Herdr install, see [§12 Open questions](#12-open-questions).
 
 ## 5. Migration map: zellij-tile → herdr socket API
 
@@ -216,8 +215,10 @@ Planned workflow, `.github/workflows/release.yml` (not yet written):
 - Matrix:
   - `macos-14` (arm64, native) → `aarch64-apple-darwin`
   - `macos-13` (x86_64, native) → `x86_64-apple-darwin`
-  - `ubuntu-latest` → `x86_64-unknown-linux-gnu` (and `aarch64` via `cross`
-    or a QEMU-backed runner, TBD — decide once build times are known)
+  - `ubuntu-latest` → `x86_64-unknown-linux-gnu`
+  - `ubuntu-24.04-arm` (native ARM, GA in both public and private repos as
+    of 2026-01-29) → `aarch64-unknown-linux-gnu` — no `cross`/QEMU needed,
+    see [§12 Open questions](#12-open-questions)
 - Steps per job: checkout → `cargo build --release --target <triple>` →
   strip binary → `sha256sum` → upload as release asset named
   `herdr-zextract-<triple>.tar.gz` (+ `.sha256`).
@@ -269,25 +270,39 @@ herdr-zextract/
 7. **Docs**: update README install section from "planned" to real
    instructions once `v0.1.0` exists.
 
-## 12. Open questions
+## 12. Open questions (resolved 2026-08-17)
 
-- Does `HERDR_PLUGIN_CONTEXT_JSON` reliably include the *previously
-  focused* pane id when a popup is launched via keybind, or only the
-  pane the popup itself is opened "in front of"? Needs verification
-  against a real Herdr install — the original Zellij plugin explicitly
-  targets "focused pane at time of keybind press," so this needs an
-  equivalent signal.
-- `pane.read` scrollback depth/limits — original plugin's `profiles`
-  config (`viewport`, or N lines) needs a confirmed equivalent parameter
-  in `pane.read`'s request shape.
-- Popup panes are described as a "singleton session resource" (no pane ID,
-  not part of layout persistence) — confirm this doesn't break
-  reopening/resizing behavior the original plugin's floating-pane UX
-  relied on.
-- Whether `aarch64-unknown-linux-gnu` CI builds need `cross` + QEMU or can
-  run on native ARM GitHub-hosted runners (availability may have changed —
-  check current GitHub Actions runner offering before writing the
-  workflow).
+All four verified live against a real Herdr 0.8.0 install (a throwaway
+`herdr plugin link`'ed probe plugin, socket API schema dump, and binary
+string inspection) — see `git log` on this section for the original
+unresolved wording.
+
+- **Focused-pane signal**: `HERDR_PLUGIN_CONTEXT_JSON` reliably includes
+  `focused_pane_id` for the pane that was focused *before* the popup
+  opened — confirmed live (`nvim` pane `w2:p5` focused → context showed
+  `"focused_pane_id":"w2:p5"`). Also carries `focused_pane_cwd`, `tab_id`,
+  `workspace_id`, `selected_text`, `clicked_url`, `invocation_source`.
+  Correction to §4/§6: the popup process is **not** told its own pane_id
+  via env (no `HERDR_PANE_ID`) — only the source pane's id, via context
+  JSON.
+- **`pane.read` scrollback depth**: confirmed shape — `pane_id`, `source`
+  (enum `visible` | `recent` | `recent_unwrapped` | `detection`, wire
+  value uses underscores even though the CLI flag uses hyphens), optional
+  `lines: u32`, `format` (`text`/`ansi`), `strip_ansi`. `recent_unwrapped`
+  is the source to use, matching §4's assumption.
+- **Popup singleton behavior**: confirmed, concretely — opening a second
+  popup while one is open fails with `"popup already open"`; `pane.list`
+  and `api snapshot` never show the popup even while its process is
+  alive. Binary strings confirm the rule: "overlay and popup plugin panes
+  target the active pane", "popup panes can only open from the normal
+  workspace view". Design implication: don't hold a persistent
+  pane_id/handle across invocations for "the popup" — each launch is a
+  fresh singleton tied to whatever's focused at that moment.
+- **`aarch64-unknown-linux-gnu` CI runners**: resolved — no `cross`/QEMU
+  needed. GitHub-hosted `ubuntu-24.04-arm`/`ubuntu-22.04-arm` runners are
+  GA and, as of 2026-01-29, available in private repos too (previously
+  public-only). Use native ARM runners directly in the `release.yml`
+  matrix.
 
 ## 13. Ideas beyond parity
 
