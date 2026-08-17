@@ -1,3 +1,4 @@
+mod matcher;
 mod socket_client;
 
 use socket_client::SocketClient;
@@ -48,8 +49,18 @@ fn run() -> Result<(), String> {
         .and_then(|v| v.as_str())
         .ok_or("pane.read response had no \"read.text\" field")?;
 
-    println!("--- scrollback of {pane_id} ---");
-    print!("{text}");
+    let matches = matcher::extract(text);
+    if matches.is_empty() {
+        println!("--- no matches in scrollback of {pane_id} ---");
+        return Ok(());
+    }
+    println!(
+        "--- {} match(es) in scrollback of {pane_id} ---",
+        matches.len()
+    );
+    for m in &matches {
+        println!("[{}] {}", m.ty.tag(), m.display);
+    }
     Ok(())
 }
 
