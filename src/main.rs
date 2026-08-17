@@ -1,4 +1,5 @@
 mod matcher;
+mod picker;
 mod socket_client;
 
 use socket_client::SocketClient;
@@ -54,12 +55,11 @@ fn run() -> Result<(), String> {
         println!("--- no matches in scrollback of {pane_id} ---");
         return Ok(());
     }
-    println!(
-        "--- {} match(es) in scrollback of {pane_id} ---",
-        matches.len()
-    );
-    for m in &matches {
-        println!("[{}] {}", m.ty.tag(), m.display);
+
+    let selection = picker::run(matches).map_err(|e| format!("picker failed: {e}"))?;
+    match selection {
+        Some(m) => println!("[{}] {}", m.ty.tag(), m.display),
+        None => println!("(cancelled)"),
     }
     Ok(())
 }

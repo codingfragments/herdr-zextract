@@ -75,7 +75,7 @@ impl MatchType {
 /// Type-priority list, front of list = highest priority. Drives
 /// cross-type dedup (same raw text matched by two pattern types keeps
 /// whichever type ranks earliest here).
-const TYPE_PRIORITY: &[MatchType] = &[
+pub const TYPE_PRIORITY: &[MatchType] = &[
     MatchType::Url,
     MatchType::Diagnostic,
     MatchType::File,
@@ -94,6 +94,16 @@ fn type_priority_index(ty: MatchType) -> usize {
         .iter()
         .position(|&t| t == ty)
         .unwrap_or(TYPE_PRIORITY.len())
+}
+
+/// Picker-rank score bonus derived from priority list position.
+/// Symmetric around the middle: front of list = positive bonus, middle
+/// = 0, tail = negative. Used by the picker's fuzzy filter to bias
+/// relative ranking when fuzzy scores are close.
+pub fn type_priority_bonus(ty: MatchType) -> i32 {
+    let n = TYPE_PRIORITY.len() as i32;
+    let pos = type_priority_index(ty) as i32;
+    n / 2 - pos
 }
 
 /// Trim trailing punctuation that's commonly adjacent to a match in

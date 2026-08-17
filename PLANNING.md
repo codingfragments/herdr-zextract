@@ -370,6 +370,35 @@ action menu — selection just echoes the pick for now.
    process — check with `ps` that the plugin process exits).
 4. Press Esc/Ctrl-C and confirm the picker closes without error.
 
+**Done (verified 2026-08-17):** ported `fuzzy.rs` (nucleo-matcher
+wrapper) and `query.rs` (`#type`/`#!type` filter-token parsing) from
+the original repo near-verbatim into `picker/` — both are pure and
+host-agnostic. `picker/mod.rs` ports the original `State::refilter`,
+`current_match`, `truncate_display`, and `highlight_spans` logic, but
+**does not** port `render.rs`'s hand-rolled Buffer→ANSI emitter — that
+existed only because Zellij's WASM host couldn't link `crossterm`
+directly; Herdr plugins are native, so this uses `ratatui`'s standard
+`CrosstermBackend` + a normal `Terminal::draw` event loop instead
+(simpler, gets resize/cursor handling for free). Single input+list
+layout, no Input/List mode split — with actions deferred to Phase 4
+there are no list-mode verbs yet, so typing always edits the query.
+
+Bug found & fixed during manual testing: `ratatui`'s diff renderer
+assumes it starts from a blank terminal; without an explicit
+`terminal.clear()` before the first draw, cells that happen to render
+as blank in the first frame aren't force-written, leaving the pane's
+prior scrollback visible through gaps in the picker UI. Fixed with one
+`terminal.clear()` call right after `Terminal::new`.
+
+Tested by running the binary inside a normal (non-popup, addressable)
+pane with `HERDR_ACTIVE_PANE_ID` set to itself, then driving it via
+`herdr pane send-keys` + reading frames back with `herdr pane read
+--source visible` — popup panes aren't independently addressable (per
+§12), so this was the only way to script full keyboard-interaction
+coverage: typed-filter narrowing, `#sha` type-filter pill, arrow-key
+navigation, Enter-to-select printing the exact match, Esc-to-cancel,
+and clean process exit in both cases.
+
 ### Phase 4 — Actions
 
 **Prompt:** Replace Phase 3's "print selection" with the real
