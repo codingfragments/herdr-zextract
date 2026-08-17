@@ -12,6 +12,9 @@
 //! pattern allowlist, and query pre-fill, selected at launch by
 //! `ZEXTRACT_PROFILE` - see `doc/config-reference.md`.
 //!
+//! Phase 8 adds `log_level` and `[grab_profiles.<name>]` - see
+//! `doc/config-reference.md`.
+//!
 //! Not ported (out of scope for this phase, see PLANNING.md §11 Phase 5):
 //! `ui`, `colors`, `limits`, `types`, `actions` blocks - those configure
 //! UI/action-template surfaces this port hasn't built yet. Live reload
@@ -51,6 +54,8 @@ struct PatternsSection {
     #[serde(default)]
     secret: SecretSection,
     #[serde(default)]
+    command: CommandSection,
+    #[serde(default)]
     custom: Vec<CustomPattern>,
 }
 
@@ -72,12 +77,61 @@ fn default_true() -> bool {
     true
 }
 
+/// `[patterns.command]` - tuning for the `cmd` type's detection.
+#[derive(Debug, Clone, Deserialize, Default)]
+struct CommandSection {
+    /// The original's third command-detection strategy (walk back from
+    /// a standalone `-x`/`--long-flag` token to the nearest boundary
+    /// character to find the command word). Off by default - can
+    /// produce false positives on prose containing flag-looking tokens.
+    #[serde(default)]
+    flag_anchored: bool,
+}
+
+/// Verbosity of `herdr-zextract`'s stderr diagnostics, ported from the
+/// original's top-level `log_level` scalar. Ordered so `configured >=
+/// level` is "should this message show" - `Off` sorts lowest, so
+/// nothing is `>=` it except itself, matching "off means silence".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum LogLevel {
+    Off,
+    Error,
+    Warn,
+    #[default]
+    Info,
+    Debug,
+}
+
 #[derive(Debug, Clone, Deserialize, Default)]
 struct RawConfig {
+    #[serde(default)]
+    log_level: LogLevel,
     #[serde(default)]
     patterns: PatternsSection,
     #[serde(default)]
     profiles: std::collections::HashMap<String, Profile>,
+    #[serde(default)]
+    grab_profiles: std::collections::HashMap<String, GrabProfileOverride>,
+}
+
+/// User override for a named grab profile, ported from the original's
+/// `grab { profiles { <name> { ... } } }`. Unlike the original (which
+/// replaces *all* built-in profiles the instant this block is present
+/// at all), an entry here overrides/adds by name only - built-ins for
+/// names left untouched survive, consistent with `[profiles.<name>]`.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct GrabProfileOverride {
+    /// `"scrollback"`, `"viewport"`, or `"tab"`. Unrecognized/absent
+    /// falls back to `"scrollback"`, matching the original's default.
+    pub source: Option<String>,
+    /// Max lines to scan. `0` or absent means unbounded.
+    pub lines: Option<u32>,
+    /// Pattern type tags or custom pattern names to skip only when
+    /// this profile is active - merged into the global disable list,
+    /// not a replacement for it.
+    #[serde(default)]
+    pub disable: Vec<String>,
 }
 
 /// Per-keybind override bundle, selected at runtime by `ZEXTRACT_PROFILE`
@@ -87,9 +141,9 @@ struct RawConfig {
 /// tuning a keybind's behavior never requires touching plugin packaging.
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct Profile {
-    /// Grab profile name (`quick`/`deep`/`viewport`/`full`/`tab-scan`).
-    /// `None` defers to this profile's built-in default, if any, else
-    /// `grab::resolve`'s own fallback (`quick`).
+    /// Grab profile name (`quick`/`deep`/`viewport`/`full`/`tab-scan`,
+    /// or any name defined under `[grab_profiles.<name>]`). `None`
+    /// defaults to `quick` at the call site.
     pub grab: Option<String>,
     /// Allowlist of type tags to extract at all, overriding `[patterns]`
     /// `disable` entirely for this invocation. `None` means no
@@ -134,27 +188,44 @@ fn builtin_profile(name: &str) -> Option<Profile> {
 
 #[derive(Debug, Clone)]
 pub struct Config {
+    pub log_level: LogLevel,
     /// Built-in type tags or custom pattern names to skip entirely.
     pub disabled: HashSet<String>,
     /// Whether `secret`'s entropy-fallback pass runs, on top of the
     /// curated-format regexes (which always run regardless).
     pub secret_entropy_filter: bool,
+    /// Whether `cmd`'s flag-anchored (opt-in) detection strategy runs.
+    pub command_flag_anchored: bool,
     pub custom: Vec<CustomPattern>,
     pub profiles: std::collections::HashMap<String, Profile>,
+    pub grab_profiles: std::collections::HashMap<String, GrabProfileOverride>,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
+            log_level: LogLevel::default(),
             disabled: HashSet::new(),
             secret_entropy_filter: true,
+            command_flag_anchored: false,
             custom: Vec::new(),
             profiles: std::collections::HashMap::new(),
+            grab_profiles: std::collections::HashMap::new(),
         }
     }
 }
 
 impl Config {
+    /// Print `msg` to stderr if `level` clears this config's
+    /// `log_level` threshold - e.g. `log_level = "debug"` shows
+    /// everything, `"off"` shows nothing, the default `"info"` shows
+    /// info/warn/error but not debug traces.
+    pub fn log(&self, level: LogLevel, msg: &str) {
+        if self.log_level >= level {
+            eprintln!("herdr-zextract: {msg}");
+        }
+    }
+
     /// Resolve `name` (from `ZEXTRACT_PROFILE`) to a [`Profile`]: the
     /// user's own `[profiles.<name>]` config wins if present, else one
     /// of the four built-in named defaults, else an all-defaults
@@ -167,6 +238,37 @@ impl Config {
             .cloned()
             .or_else(|| builtin_profile(name))
             .unwrap_or_default()
+    }
+
+    /// Resolve `name` (from a profile's `grab` field) to a
+    /// [`crate::grab::ResolvedGrabProfile`]: the user's own
+    /// `[grab_profiles.<name>]` override wins if present (falling back
+    /// to the built-in of the same name for any field left unset), else
+    /// the built-in profile of that name, else `quick` - matching the
+    /// original's "typos fall back to the first defined profile".
+    pub fn resolve_grab_profile(&self, name: &str) -> crate::grab::ResolvedGrabProfile {
+        let builtin = crate::grab::builtin_grab_profile(name);
+        match self.grab_profiles.get(name) {
+            Some(over) => crate::grab::ResolvedGrabProfile {
+                source: over
+                    .source
+                    .as_deref()
+                    .map(crate::grab::GrabSource::parse)
+                    .unwrap_or_else(|| {
+                        builtin
+                            .as_ref()
+                            .map(|b| b.source)
+                            .unwrap_or(crate::grab::GrabSource::Scrollback)
+                    }),
+                lines: over
+                    .lines
+                    .or_else(|| builtin.as_ref().and_then(|b| b.lines)),
+                disable: over.disable.clone(),
+            },
+            None => builtin.unwrap_or_else(|| {
+                crate::grab::builtin_grab_profile("quick").expect("quick is always defined")
+            }),
+        }
     }
 
     /// Allowlist mode, ported from the original's per-keybind
@@ -198,12 +300,18 @@ impl Config {
         };
         match toml::from_str::<RawConfig>(&text) {
             Ok(raw) => Self {
+                log_level: raw.log_level,
                 disabled: raw.patterns.disable.into_iter().collect(),
                 secret_entropy_filter: raw.patterns.secret.entropy_filter,
+                command_flag_anchored: raw.patterns.command.flag_anchored,
                 custom: raw.patterns.custom,
                 profiles: raw.profiles,
+                grab_profiles: raw.grab_profiles,
             },
             Err(e) => {
+                // log_level can't be consulted here - it lives in the
+                // very file that just failed to parse - so this always
+                // shows, matching the default level's threshold.
                 eprintln!("herdr-zextract: failed to parse {}: {e}", path.display());
                 Self::default()
             }
@@ -247,6 +355,15 @@ pub fn write_default() -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shipped_example_config_parses() {
+        // config.example.toml is the Ctrl-W starter template AND the
+        // README's copy-pasteable reference - a syntax mistake in it
+        // (bad indentation, wrong table header, etc.) should fail CI,
+        // not surface as a live "failed to parse config.toml" report.
+        toml::from_str::<RawConfig>(DEFAULT_CONFIG_TOML).expect("template must parse as TOML");
+    }
 
     #[test]
     fn restrict_to_disables_everything_not_allowed() {
@@ -350,5 +467,75 @@ mod tests {
         let profile = config.resolve_profile("custom0");
         assert_eq!(profile.grab, Some("deep".to_string()));
         assert_eq!(profile.patterns, Some(vec!["secret".to_string()]));
+    }
+
+    #[test]
+    fn resolve_grab_profile_builtin_with_zero_config() {
+        let config = Config::default();
+        let p = config.resolve_grab_profile("deep");
+        assert_eq!(p.lines, Some(1500));
+        assert!(p.disable.is_empty());
+    }
+
+    #[test]
+    fn resolve_grab_profile_unknown_name_falls_back_to_quick() {
+        let config = Config::default();
+        let p = config.resolve_grab_profile("nonexistent");
+        assert_eq!(p.lines, Some(150));
+        assert_eq!(p.source, crate::grab::GrabSource::Scrollback);
+    }
+
+    #[test]
+    fn resolve_grab_profile_override_fills_unset_fields_from_builtin() {
+        let mut config = Config::default();
+        config.grab_profiles.insert(
+            "quick".to_string(),
+            GrabProfileOverride {
+                source: None,
+                lines: Some(300),
+                disable: vec!["secret".to_string()],
+            },
+        );
+        let p = config.resolve_grab_profile("quick");
+        // lines overridden, source falls back to quick's own builtin.
+        assert_eq!(p.lines, Some(300));
+        assert_eq!(p.source, crate::grab::GrabSource::Scrollback);
+        assert_eq!(p.disable, vec!["secret".to_string()]);
+    }
+
+    #[test]
+    fn resolve_grab_profile_user_defines_wholly_new_name() {
+        let mut config = Config::default();
+        config.grab_profiles.insert(
+            "jira-deep".to_string(),
+            GrabProfileOverride {
+                source: Some("tab".to_string()),
+                lines: Some(500),
+                disable: Vec::new(),
+            },
+        );
+        let p = config.resolve_grab_profile("jira-deep");
+        assert_eq!(p.source, crate::grab::GrabSource::Tab);
+        assert_eq!(p.lines, Some(500));
+    }
+
+    #[test]
+    fn log_off_suppresses_error_level() {
+        let config = Config {
+            log_level: LogLevel::Off,
+            ..Config::default()
+        };
+        // No assertion on stderr content (would need capture plumbing)
+        // - this just exercises the threshold comparison for panics.
+        config.log(LogLevel::Error, "should not print");
+        assert!(LogLevel::Off < LogLevel::Error);
+    }
+
+    #[test]
+    fn log_level_ordering_matches_verbosity() {
+        assert!(LogLevel::Off < LogLevel::Error);
+        assert!(LogLevel::Error < LogLevel::Warn);
+        assert!(LogLevel::Warn < LogLevel::Info);
+        assert!(LogLevel::Info < LogLevel::Debug);
     }
 }

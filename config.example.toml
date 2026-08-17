@@ -8,6 +8,9 @@
 # Full reference: doc/config-reference.md in the plugin repo.
 # This file is read once per popup launch - no live reload.
 
+# Verbosity of stderr diagnostics. One of: off, error, warn, info, debug.
+# log_level = "info"
+
 [patterns]
 # Built-in type tags or custom pattern names to skip entirely.
 # Built-in tags: url, file, diag, git, sha, ipv4, ipv6, uuid, quote, cmd, secret
@@ -17,6 +20,14 @@
 # Curated formats (JWT, AWS, GitHub, ...) always run. Set false to
 # disable the broader entropy-based fallback pass.
 entropy_filter = true
+
+[patterns.command]
+# Opt-in third command-detection strategy: finds a standalone -x/--flag
+# token and walks back to the command word, for commands with no
+# recognized prompt marker and no known trigger word (e.g. `[dry-run]
+# jq -r '.foo' file.json`). Off by default - can false-positive on
+# prose containing flag-looking tokens.
+flag_anchored = false
 
 # Custom regex patterns. Each gets its own #name filter tag in the
 # picker. Uncomment and adjust, or add your own [[patterns.custom]]
@@ -59,3 +70,20 @@ entropy_filter = true
 # [profiles.custom0]
 # grab = "deep"
 # patterns = ["secret"]
+
+# Named grab-profile *definitions* - what "quick"/"deep"/etc. actually
+# mean (source + line cap), as opposed to [profiles.*] above (which
+# only ever *selects* a grab profile by name). Built-in defaults for
+# quick/deep/viewport/full/tab-scan work with zero config here; add a
+# block only to override one, or define a wholly new name.
+#
+# [grab_profiles.deep]
+# source = "scrollback"   # scrollback | viewport | tab
+# lines = 3000             # override the built-in 1500
+#
+# [grab_profiles.tab-scan]
+# disable = ["secret", "ipv6"]   # skip these only while this profile is active
+#
+# [grab_profiles.jira-deep]
+# source = "scrollback"
+# lines = 500

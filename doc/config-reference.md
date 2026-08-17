@@ -32,6 +32,25 @@ doc will grow as later phases add them.
 
 ---
 
+## `log_level` — stderr diagnostic verbosity
+
+```toml
+log_level = "info"   # default
+```
+
+One of `off`, `error`, `warn`, `info`, `debug`. Governs
+`herdr-zextract`-prefixed stderr diagnostics (visible via `herdr plugin
+log`) - not the picker's own user-facing result/error line, which
+always shows regardless (it's the only feedback a failed launch gets).
+`off` shows nothing; `debug` shows everything, including which grab
+profile and pattern restriction a launch resolved to.
+
+One inherent limitation: a config *parse error* is reported at the
+default level regardless of this setting, since the level itself lives
+in the same file that failed to parse.
+
+---
+
 ## `[patterns]` — global disable list
 
 ```toml
@@ -60,6 +79,30 @@ these always run regardless of this setting) plus an entropy-based
 fallback that catches unknown high-entropy tokens. Set `entropy_filter
 = false` to disable the fallback pass and rely only on curated formats
 (fewer false positives, misses unknown secret formats).
+
+---
+
+## `[patterns.command]` — flag-anchored detection toggle
+
+```toml
+[patterns.command]
+flag_anchored = false   # default
+```
+
+`cmd` detection runs two strategies always (prompt-anchored, then
+exec-anchored against a known trigger word) plus a third, opt-in
+strategy tried only when neither of the first two matches a line: find
+the leftmost standalone `-x`/`-xyz`/`--long-flag` token, walk backward
+to the nearest boundary character (`][}{><:;|&(,'"`), then forward past
+whitespace to the command word. Catches commands with no recognized
+prompt and no trigger word (e.g. `[dry-run] jq -r '.foo' file.json`).
+
+Guards: the command word must start with a lowercase ASCII letter and
+be at least 2 characters — rejects `The --verbose flag` (uppercase) and
+single-letter noise. Off by default because it can still false-positive
+on ordinary prose containing flag-looking tokens (e.g. `"missing
+argument -v"`); use `#cmd`/`#!cmd` query filters to show or hide command
+matches in a session where the noise is too high.
 
 ---
 
@@ -154,3 +197,49 @@ failing, so binding a `zextract-customN` action before configuring its
 profile is safe. Define `[profiles.customN]` here to give one an actual
 grab scope and/or pattern allowlist, then bind a key to the matching
 `zextract-customN` action.
+
+---
+
+## `[grab_profiles.<name>]` — grab profile definitions
+
+```toml
+[grab_profiles.deep]
+lines = 3000
+
+[grab_profiles.jira-deep]
+source = "scrollback"
+lines = 500
+```
+
+Don't confuse this with `[profiles.<name>]` above: that block only ever
+*selects* a grab profile by name (`grab = "deep"`); this block defines
+what a grab profile name actually *means*. `quick`/`deep`/`viewport`/
+`full`/`tab-scan` all have built-in Rust-side definitions, so grab
+scopes work with zero config here too — add a block only to override
+one, or to define a wholly new name for `[profiles.<name>]` to select.
+
+| Key | Description |
+|---|---|
+| `source` | `"scrollback"`, `"viewport"`, or `"tab"`. Unrecognized/absent falls back to `"scrollback"`. |
+| `lines` | Max lines to scan. `0` or absent means unbounded. |
+| `disable` | Type tags/custom pattern names to skip only while this profile is active — merged into the invocation's disable list, not a replacement for it. Ignored entirely if a keybind's `[profiles.<name>].patterns` allowlist is also set (allowlist mode overrides every disable source, global and per-profile alike). |
+
+**Built-in definitions:**
+
+| Name | `source` | `lines` |
+|---|---|---|
+| `quick` | scrollback | 150 |
+| `deep` | scrollback | 1500 |
+| `viewport` | viewport | unbounded |
+| `full` | scrollback | unbounded |
+| `tab-scan` | tab | 150 |
+
+Unlike the original plugin (where defining even one profile under its
+`grab { profiles { } }` block replaces *all four* built-in defaults at
+once), a block here overrides or adds by name only — built-ins for
+names you don't touch survive. Fields you omit within a block you do
+define fall back to that name's built-in value, if one exists (e.g.
+`[grab_profiles.deep]` with just `lines = 3000` keeps `deep`'s built-in
+`scrollback` source). An unrecognized name with no block at all falls
+back to `quick`, matching the original's "typos fall back to the first
+defined profile" behavior.

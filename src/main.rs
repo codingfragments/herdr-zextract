@@ -65,9 +65,17 @@ fn run() -> Result<(), String> {
     let profile_name = std::env::var("ZEXTRACT_PROFILE").unwrap_or_else(|_| "open".to_string());
     let profile = config.resolve_profile(&profile_name);
 
-    let grab_profile = grab::resolve(profile.grab.as_deref().unwrap_or(""));
+    let grab_profile = config.resolve_grab_profile(profile.grab.as_deref().unwrap_or("quick"));
+    config.log(
+        config::LogLevel::Debug,
+        &format!(
+            "profile {profile_name:?}: grab source={:?} lines={:?} patterns={:?}",
+            grab_profile.source, grab_profile.lines, profile.patterns
+        ),
+    );
+    config.disabled.extend(grab_profile.disable.iter().cloned());
     let captures = grab::capture(
-        grab_profile,
+        &grab_profile,
         &socket_path,
         &ctx.focused_pane_id,
         &ctx.tab_id,

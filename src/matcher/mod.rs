@@ -204,7 +204,7 @@ pub fn extract_with_config(text: &str, config: &crate::config::Config) -> Vec<Ma
         all.extend(quoted::extract(text));
     }
     if !dis.contains("cmd") {
-        all.extend(command::extract(text));
+        all.extend(command::extract(text, config.command_flag_anchored));
     }
     if !dis.contains("secret") {
         all.extend(secret::extract(text, config.secret_entropy_filter));

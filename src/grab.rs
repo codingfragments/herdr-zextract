@@ -15,50 +15,52 @@ pub enum GrabSource {
     Tab,
 }
 
-#[derive(Debug, Clone)]
-pub struct GrabProfile {
-    pub name: &'static str,
-    pub source: GrabSource,
-    pub lines: Option<u32>,
+impl GrabSource {
+    /// Parses `[grab_profiles.<name>].source`'s string form.
+    /// Unrecognized or absent falls back to `Scrollback`, matching the
+    /// original's own default.
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "viewport" => Self::Viewport,
+            "tab" => Self::Tab,
+            _ => Self::Scrollback,
+        }
+    }
 }
 
-/// Built-in profiles, matching the original's defaults exactly.
-pub const PROFILES: &[GrabProfile] = &[
-    GrabProfile {
-        name: "quick",
-        source: GrabSource::Scrollback,
-        lines: Some(150),
-    },
-    GrabProfile {
-        name: "deep",
-        source: GrabSource::Scrollback,
-        lines: Some(1500),
-    },
-    GrabProfile {
-        name: "viewport",
-        source: GrabSource::Viewport,
-        lines: None,
-    },
-    GrabProfile {
-        name: "full",
-        source: GrabSource::Scrollback,
-        lines: None,
-    },
-    GrabProfile {
-        name: "tab-scan",
-        source: GrabSource::Tab,
-        lines: Some(150),
-    },
-];
+/// A fully-resolved grab profile, ready to capture with - the merge of
+/// a built-in definition (if any) and a user's `[grab_profiles.<name>]`
+/// override (if any), done by `Config::resolve_grab_profile`.
+#[derive(Debug, Clone)]
+pub struct ResolvedGrabProfile {
+    pub source: GrabSource,
+    /// Max lines to scan. `None` means unbounded.
+    pub lines: Option<u32>,
+    /// Pattern type tags/custom pattern names to skip only while this
+    /// profile is active - merged into the invocation's disable list.
+    pub disable: Vec<String>,
+}
 
-/// Resolve `name` to a profile, falling back to the first defined
-/// profile (`quick`) on an empty or unknown name - matches the
-/// original's "typos fall back to the first profile" behavior.
-pub fn resolve(name: &str) -> &'static GrabProfile {
-    PROFILES
-        .iter()
-        .find(|p| p.name == name)
-        .unwrap_or(&PROFILES[0])
+/// Built-in profile definitions, matching the original's own defaults
+/// exactly for `quick`/`deep`/`viewport`/`full`. `tab-scan` is a
+/// herdr-zextract-specific addition - the original doesn't ship it as
+/// a built-in default, only as an opt-in example in its docs; this
+/// port always has it available since `doc/keybinding.md`'s `tab`
+/// profile depends on it existing with zero user config.
+pub fn builtin_grab_profile(name: &str) -> Option<ResolvedGrabProfile> {
+    let (source, lines) = match name {
+        "quick" => (GrabSource::Scrollback, Some(150)),
+        "deep" => (GrabSource::Scrollback, Some(1500)),
+        "viewport" => (GrabSource::Viewport, None),
+        "full" => (GrabSource::Scrollback, None),
+        "tab-scan" => (GrabSource::Tab, Some(150)),
+        _ => return None,
+    };
+    Some(ResolvedGrabProfile {
+        source,
+        lines,
+        disable: Vec::new(),
+    })
 }
 
 pub struct PaneCapture {
@@ -72,7 +74,7 @@ pub struct PaneCapture {
 /// Capture scrollback per `profile`. `focused_pane_id`/`tab_id` come
 /// from the launch context (`HERDR_PLUGIN_CONTEXT_JSON`).
 pub fn capture(
-    profile: &GrabProfile,
+    profile: &ResolvedGrabProfile,
     socket_path: &str,
     focused_pane_id: &str,
     tab_id: &str,
@@ -177,31 +179,39 @@ mod tests {
     use super::*;
 
     #[test]
-    fn resolve_known_profile() {
-        assert_eq!(resolve("deep").name, "deep");
-        assert_eq!(resolve("deep").lines, Some(1500));
+    fn builtin_grab_profile_known_name() {
+        let p = builtin_grab_profile("deep").unwrap();
+        assert_eq!(p.lines, Some(1500));
     }
 
     #[test]
-    fn resolve_unknown_falls_back_to_first_profile() {
-        assert_eq!(resolve("nonexistent").name, "quick");
-    }
-
-    #[test]
-    fn resolve_empty_falls_back_to_first_profile() {
-        assert_eq!(resolve("").name, "quick");
+    fn builtin_grab_profile_unknown_name_returns_none() {
+        assert!(builtin_grab_profile("nonexistent").is_none());
+        assert!(builtin_grab_profile("").is_none());
     }
 
     #[test]
     fn tab_scan_profile_has_per_pane_line_cap() {
-        let p = resolve("tab-scan");
+        let p = builtin_grab_profile("tab-scan").unwrap();
         assert_eq!(p.source, GrabSource::Tab);
         assert_eq!(p.lines, Some(150));
     }
 
     #[test]
     fn full_profile_is_unbounded() {
-        assert_eq!(resolve("full").lines, None);
+        assert_eq!(builtin_grab_profile("full").unwrap().lines, None);
+    }
+
+    #[test]
+    fn grab_source_parse_recognizes_all_variants() {
+        assert_eq!(GrabSource::parse("viewport"), GrabSource::Viewport);
+        assert_eq!(GrabSource::parse("tab"), GrabSource::Tab);
+        assert_eq!(GrabSource::parse("scrollback"), GrabSource::Scrollback);
+    }
+
+    #[test]
+    fn grab_source_parse_unknown_falls_back_to_scrollback() {
+        assert_eq!(GrabSource::parse("bogus"), GrabSource::Scrollback);
     }
 
     #[test]
