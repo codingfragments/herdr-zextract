@@ -55,7 +55,12 @@ fn run() -> Result<(), String> {
         .map_err(|_| "HERDR_SOCKET_PATH is not set".to_string())?;
 
     let config_missing = config::is_missing();
-    let mut config = config::Config::load();
+    let config = config::Config::load();
+    // [patterns].disable before any grab-profile-specific or
+    // launch-allowlist adjustment - the fixed baseline every grabber in
+    // the Ctrl-G cycle merges its own `disable` list into (see
+    // `GrabCycler::new`).
+    let raw_disabled = config.disabled.clone();
 
     // Per-keybind override: which named profile (grab scope, pattern
     // allowlist, query pre-fill) to use. The launcher action in
@@ -64,16 +69,19 @@ fn run() -> Result<(), String> {
     // under [profiles.<name>], never in plugin packaging.
     let profile_name = std::env::var("ZEXTRACT_PROFILE").unwrap_or_else(|_| "open".to_string());
     let profile = config.resolve_profile(&profile_name);
+    let initial_grab_name = profile.grab.clone().unwrap_or_else(|| "quick".to_string());
+    let allowed: Option<std::collections::HashSet<String>> = profile
+        .patterns
+        .as_ref()
+        .map(|p| p.iter().cloned().collect());
 
-    let grab_profile = config.resolve_grab_profile(profile.grab.as_deref().unwrap_or("quick"));
     config.log(
         config::LogLevel::Debug,
         &format!(
-            "profile {profile_name:?}: grab source={:?} lines={:?} patterns={:?}",
-            grab_profile.source, grab_profile.lines, profile.patterns
+            "profile {profile_name:?}: grab={initial_grab_name:?} patterns={:?}",
+            profile.patterns
         ),
     );
-    config.disabled.extend(grab_profile.disable.iter().cloned());
 
     // Preview pane rendering itself is Phase 9 - resolved here anyway
     // so `[ui].preview`/`[profiles.<name>].preview` are both exercised
@@ -86,36 +94,19 @@ fn run() -> Result<(), String> {
             config.ui.preview_open_width, config.ui.preview_closed_width
         ),
     );
-    let captures = grab::capture(
-        &grab_profile,
-        &socket_path,
-        &ctx.focused_pane_id,
-        &ctx.tab_id,
-    )
-    .map_err(|e| format!("grab failed: {e}"))?;
 
-    if let Some(patterns) = &profile.patterns {
-        let allowed: std::collections::HashSet<String> = patterns.iter().cloned().collect();
-        config.restrict_to(&allowed);
-    }
-
-    let multi_pane = captures.len() > 1;
-    let mut matches = Vec::new();
-    for cap in &captures {
-        let mut found = matcher::extract_with_config(&cap.text, &config);
-        // Pane-title prefix only makes sense (and is only computed)
-        // when more than one pane actually contributed matches -
-        // matches the original's "prefix omitted in single-pane mode".
-        if multi_pane {
-            for m in &mut found {
-                m.fields
-                    .insert("__pane_id".to_string(), cap.pane_id.clone());
-                m.fields
-                    .insert("__pane_title".to_string(), cap.title.clone());
-            }
-        }
-        matches.extend(found);
-    }
+    let grab_cycler = grab::GrabCycler::new(
+        &config,
+        &raw_disabled,
+        allowed.as_ref(),
+        &initial_grab_name,
+        socket_path.clone(),
+        ctx.focused_pane_id.clone(),
+        ctx.tab_id.clone(),
+    );
+    let (matches, _multi_pane) = grab_cycler
+        .capture_current()
+        .map_err(|e| format!("grab failed: {e}"))?;
     if matches.is_empty() {
         println!("--- no matches found ---");
         return Ok(());
@@ -139,6 +130,7 @@ fn run() -> Result<(), String> {
         config_missing,
         &config,
         &initial_query,
+        grab_cycler,
     )
     .map_err(|e| format!("picker failed: {e}"))?;
     match selection {

@@ -8,6 +8,17 @@
 //! non-floating, non-plugin pane on the active tab" reduces to simply
 //! every pane `pane.list` returns for that tab, no extra filtering.
 
+use std::collections::HashSet;
+
+use crate::config::Config;
+use crate::matcher::{self, Match};
+
+/// The five grab profiles with built-in Rust-side definitions, in the
+/// fixed order [`Config::cycle_grab_profile_names`] and [`GrabCycler`]
+/// present them in - custom names defined under `[grab_profiles.<name>]`
+/// are appended after these, sorted alphabetically for a stable order.
+pub const BUILTIN_PROFILE_NAMES: &[&str] = &["quick", "deep", "viewport", "full", "tab-scan"];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GrabSource {
     Scrollback,
@@ -69,6 +80,119 @@ pub struct PaneCapture {
     /// more than one pane contributes matches. Empty in single-pane mode.
     pub title: String,
     pub text: String,
+}
+
+/// Cycles the picker's live capture through every configured grab
+/// profile (`Ctrl-G`), re-capturing and re-extracting on each step
+/// without leaving `main.rs`'s one-shot launch flow — the picker owns
+/// one of these for the duration of a session.
+pub struct GrabCycler {
+    names: Vec<String>,
+    profiles: Vec<ResolvedGrabProfile>,
+    /// Per-name effective `disabled` set, precomputed once at
+    /// construction since neither the launch profile's allowlist nor
+    /// `[patterns].disable` change during a picker session - only which
+    /// grab profile's own `disable` list (if any) gets merged in varies.
+    disabled_sets: Vec<HashSet<String>>,
+    current: usize,
+    socket_path: String,
+    focused_pane_id: String,
+    tab_id: String,
+    /// Clone of the launch `Config`, so re-extraction sees the same
+    /// `custom` patterns/etc. as the initial capture - `disabled` is
+    /// overwritten per call from `disabled_sets`, never read from here.
+    config_template: Config,
+}
+
+impl GrabCycler {
+    /// `raw_disabled` is `[patterns].disable` before any grab-profile or
+    /// launch-allowlist adjustment. `allowed` is the launching profile's
+    /// `patterns` allowlist, if set - when present, every grabber in the
+    /// cycle uses that same fixed complement and ignores each grab
+    /// profile's own `disable` list, matching `Config::restrict_to`'s
+    /// "allowlist overrides every disable source" rule. `initial_name`
+    /// is the launching profile's `grab` field (or `"quick"`); cycling
+    /// starts there (falling back to index 0 if unrecognized) and wraps
+    /// forward from there.
+    pub fn new(
+        config: &Config,
+        raw_disabled: &HashSet<String>,
+        allowed: Option<&HashSet<String>>,
+        initial_name: &str,
+        socket_path: String,
+        focused_pane_id: String,
+        tab_id: String,
+    ) -> Self {
+        let names = config.cycle_grab_profile_names();
+        let profiles: Vec<ResolvedGrabProfile> = names
+            .iter()
+            .map(|n| config.resolve_grab_profile(n))
+            .collect();
+        let disabled_sets: Vec<HashSet<String>> = profiles
+            .iter()
+            .map(|gp| config.disabled_for(allowed, raw_disabled, &gp.disable))
+            .collect();
+        let current = names.iter().position(|n| n == initial_name).unwrap_or(0);
+        Self {
+            names,
+            profiles,
+            disabled_sets,
+            current,
+            socket_path,
+            focused_pane_id,
+            tab_id,
+            config_template: config.clone(),
+        }
+    }
+
+    pub fn current_name(&self) -> &str {
+        &self.names[self.current]
+    }
+
+    /// Capture + extract with the grabber the cycle currently points
+    /// at, used for the picker's initial load so `main.rs` doesn't
+    /// duplicate the multi-pane/`__pane_id` handling done here.
+    pub fn capture_current(&self) -> Result<(Vec<Match>, bool), String> {
+        self.capture_and_extract(self.current)
+    }
+
+    /// Capture + extract with the next grabber in the cycle (wrapping
+    /// around), advancing `current` only on success - a socket failure
+    /// leaves the picker's existing matches and displayed grabber name
+    /// untouched rather than clearing the list.
+    pub fn cycle_next(&mut self) -> Result<(Vec<Match>, bool), String> {
+        let next = (self.current + 1) % self.names.len();
+        let result = self.capture_and_extract(next)?;
+        self.current = next;
+        Ok(result)
+    }
+
+    fn capture_and_extract(&self, index: usize) -> Result<(Vec<Match>, bool), String> {
+        let profile = &self.profiles[index];
+        let captures = capture(
+            profile,
+            &self.socket_path,
+            &self.focused_pane_id,
+            &self.tab_id,
+        )?;
+        let multi_pane = captures.len() > 1;
+        let mut config = self.config_template.clone();
+        config.disabled = self.disabled_sets[index].clone();
+        let mut matches = Vec::new();
+        for cap in &captures {
+            let mut found = matcher::extract_with_config(&cap.text, &config);
+            if multi_pane {
+                for m in &mut found {
+                    m.fields
+                        .insert("__pane_id".to_string(), cap.pane_id.clone());
+                    m.fields
+                        .insert("__pane_title".to_string(), cap.title.clone());
+                }
+            }
+            matches.extend(found);
+        }
+        Ok((matches, multi_pane))
+    }
 }
 
 /// Capture scrollback per `profile`. `focused_pane_id`/`tab_id` come
@@ -177,6 +301,43 @@ fn capture_tab(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn cycler(config: &Config, initial_name: &str) -> GrabCycler {
+        GrabCycler::new(
+            config,
+            &HashSet::new(),
+            None,
+            initial_name,
+            "/tmp/socket".to_string(),
+            "pane1".to_string(),
+            "tab1".to_string(),
+        )
+    }
+
+    #[test]
+    fn grab_cycler_starts_at_the_named_initial_profile() {
+        let config = Config::default();
+        let c = cycler(&config, "deep");
+        assert_eq!(c.current_name(), "deep");
+    }
+
+    #[test]
+    fn grab_cycler_unrecognized_initial_name_falls_back_to_first() {
+        let config = Config::default();
+        let c = cycler(&config, "nonexistent");
+        assert_eq!(c.current_name(), BUILTIN_PROFILE_NAMES[0]);
+    }
+
+    #[test]
+    fn grab_cycler_names_include_custom_grab_profiles() {
+        let mut config = Config::default();
+        config.grab_profiles.insert(
+            "jira-deep".to_string(),
+            crate::config::GrabProfileOverride::default(),
+        );
+        let c = cycler(&config, "jira-deep");
+        assert_eq!(c.current_name(), "jira-deep");
+    }
 
     #[test]
     fn builtin_grab_profile_known_name() {

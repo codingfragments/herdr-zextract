@@ -11,10 +11,13 @@
 //! Scope: fuzzy-filter, `#type` include/exclude tokens, navigate,
 //! Input/List modes (`Tab` toggles - Input types into the query, List
 //! fires bare-letter verbs), multi-select (`Space`/`Ctrl-A`/`Ctrl-D`)
-//! with batch dispatch, a dedicated footer/banner row, and a
-//! config-driven `[colors]` theme (Phase 8). No preview pane yet
-//! (Phase 9) - `[ui].preview`/`[profiles.<name>].preview` are resolved
-//! in `main.rs` but have no rendering to act on yet.
+//! with batch dispatch, a dedicated footer/banner row, a config-driven
+//! `[colors]` theme (Phase 8), and live `Ctrl-G` cycling through every
+//! configured grab profile (re-captures + re-extracts in place via
+//! [`crate::grab::GrabCycler`], owned by [`State`] for the session).
+//! No preview pane yet (Phase 9) - `[ui].preview`/
+//! `[profiles.<name>].preview` are resolved in `main.rs` but have no
+//! rendering to act on yet.
 
 pub mod fuzzy;
 pub mod query;
@@ -212,6 +215,9 @@ struct State {
     /// Cloned once at startup - `[types.<tag>]`/`[limits]` drive the
     /// footer's allowed-verb hints and `try_fire`'s batch-cap checks.
     config: crate::config::Config,
+    /// `Ctrl-G` cycles through this - re-captures and re-extracts with
+    /// the next grab profile, refreshing `matches` in place.
+    grab_cycler: crate::grab::GrabCycler,
 }
 
 impl State {
@@ -221,6 +227,7 @@ impl State {
         config_missing: bool,
         config: &crate::config::Config,
         initial_query: &str,
+        grab_cycler: crate::grab::GrabCycler,
     ) -> Self {
         let mut state = Self {
             matches,
@@ -238,9 +245,34 @@ impl State {
             selected: HashSet::new(),
             theme: Theme::resolve(&config.colors),
             config: config.clone(),
+            grab_cycler,
         };
         state.refilter();
         state
+    }
+
+    /// Re-capture and re-extract with the next grab profile in the
+    /// cycle (`Ctrl-G`), replacing `self.matches` and refiltering on
+    /// success. The multi-selection doesn't survive - a regrab can
+    /// wholly change which matches exist, so stale indices into the old
+    /// `matches` vector would silently select the wrong rows.
+    fn cycle_grab(&mut self) {
+        match self.grab_cycler.cycle_next() {
+            Ok((matches, _multi_pane)) => {
+                self.matches = matches;
+                self.selected.clear();
+                self.refilter();
+                self.message = Some((
+                    format!(
+                        "grab: {} ({} matches)",
+                        self.grab_cycler.current_name(),
+                        self.matches.len()
+                    ),
+                    false,
+                ));
+            }
+            Err(e) => self.message = Some((format!("regrab failed: {e}"), true)),
+        }
     }
 
     /// Toggle the highlighted row's membership in the multi-selection.
@@ -394,6 +426,7 @@ pub fn run(
     config_missing: bool,
     config: &crate::config::Config,
     initial_query: &str,
+    grab_cycler: crate::grab::GrabCycler,
 ) -> io::Result<PickerResult> {
     let mut state = State::new(
         matches,
@@ -401,6 +434,7 @@ pub fn run(
         config_missing,
         config,
         initial_query,
+        grab_cycler,
     );
 
     enable_raw_mode()?;
@@ -492,6 +526,10 @@ fn run_loop(
                 }
                 KeyCode::Char('d') => {
                     state.deselect_all();
+                    continue;
+                }
+                KeyCode::Char('g') => {
+                    state.cycle_grab();
                     continue;
                 }
                 _ => {}
@@ -683,6 +721,13 @@ fn render_input(frame: &mut Frame, area: Rect, state: &State) {
         Style::default()
             .fg(state.theme.muted)
             .add_modifier(Modifier::DIM),
+    ));
+    spans.push(Span::raw("   "));
+    spans.push(Span::styled(
+        format!("grab:{}", state.grab_cycler.current_name()),
+        Style::default()
+            .fg(state.theme.accent)
+            .add_modifier(Modifier::BOLD),
     ));
     let p = Paragraph::new(Line::from(spans)).block(
         Block::default()
@@ -877,7 +922,9 @@ fn render_footer(frame: &mut Frame, area: Rect, state: &State) {
         line2.push(Span::styled("Ctrl-A", bold));
         line2.push(Span::raw("/"));
         line2.push(Span::styled("Ctrl-D", bold));
-        line2.push(Span::raw(":select all/none"));
+        line2.push(Span::raw(":select all/none    "));
+        line2.push(Span::styled("Ctrl-G", bold));
+        line2.push(Span::raw(":next grabber"));
     } else {
         line2.push(Span::styled(
             format!("{} selected", state.selected.len()),
