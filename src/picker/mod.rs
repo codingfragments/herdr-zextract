@@ -11,10 +11,13 @@
 //! Scope: fuzzy-filter, `#type` include/exclude tokens, navigate,
 //! Input/List modes (`Tab` toggles - Input types into the query, List
 //! fires bare-letter verbs), multi-select (`Space`/`Ctrl-A`/`Ctrl-D`)
-//! with batch dispatch, a dedicated footer/banner row, and a
-//! config-driven `[colors]` theme (Phase 8). No preview pane yet
-//! (Phase 9) - `[ui].preview`/`[profiles.<name>].preview` are resolved
-//! in `main.rs` but have no rendering to act on yet.
+//! with batch dispatch, a dedicated footer/banner row, a config-driven
+//! `[colors]` theme (Phase 8), and live `Ctrl-G` cycling through every
+//! configured grab profile (re-captures + re-extracts in place via
+//! [`crate::grab::GrabCycler`], owned by [`State`] for the session).
+//! No preview pane yet (Phase 9) - `[ui].preview`/
+//! `[profiles.<name>].preview` are resolved in `main.rs` but have no
+//! rendering to act on yet.
 
 pub mod fuzzy;
 pub mod query;
@@ -212,6 +215,9 @@ struct State {
     /// Cloned once at startup - `[types.<tag>]`/`[limits]` drive the
     /// footer's allowed-verb hints and `try_fire`'s batch-cap checks.
     config: crate::config::Config,
+    /// `Ctrl-G` cycles through this - re-captures and re-extracts with
+    /// the next grab profile, refreshing `matches` in place.
+    grab_cycler: crate::grab::GrabCycler,
 }
 
 impl State {
@@ -221,6 +227,7 @@ impl State {
         config_missing: bool,
         config: &crate::config::Config,
         initial_query: &str,
+        grab_cycler: crate::grab::GrabCycler,
     ) -> Self {
         let mut state = Self {
             matches,
@@ -238,9 +245,34 @@ impl State {
             selected: HashSet::new(),
             theme: Theme::resolve(&config.colors),
             config: config.clone(),
+            grab_cycler,
         };
         state.refilter();
         state
+    }
+
+    /// Re-capture and re-extract with the next grab profile in the
+    /// cycle (`Ctrl-G`), replacing `self.matches` and refiltering on
+    /// success. The multi-selection doesn't survive - a regrab can
+    /// wholly change which matches exist, so stale indices into the old
+    /// `matches` vector would silently select the wrong rows.
+    fn cycle_grab(&mut self) {
+        match self.grab_cycler.cycle_next() {
+            Ok((matches, _multi_pane)) => {
+                self.matches = matches;
+                self.selected.clear();
+                self.refilter();
+                self.message = Some((
+                    format!(
+                        "grab: {} ({} matches)",
+                        self.grab_cycler.current_name(),
+                        self.matches.len()
+                    ),
+                    false,
+                ));
+            }
+            Err(e) => self.message = Some((format!("regrab failed: {e}"), true)),
+        }
     }
 
     /// Toggle the highlighted row's membership in the multi-selection.
@@ -394,6 +426,7 @@ pub fn run(
     config_missing: bool,
     config: &crate::config::Config,
     initial_query: &str,
+    grab_cycler: crate::grab::GrabCycler,
 ) -> io::Result<PickerResult> {
     let mut state = State::new(
         matches,
@@ -401,6 +434,7 @@ pub fn run(
         config_missing,
         config,
         initial_query,
+        grab_cycler,
     );
 
     enable_raw_mode()?;
@@ -492,6 +526,10 @@ fn run_loop(
                 }
                 KeyCode::Char('d') => {
                     state.deselect_all();
+                    continue;
+                }
+                KeyCode::Char('g') => {
+                    state.cycle_grab();
                     continue;
                 }
                 _ => {}
@@ -619,9 +657,48 @@ fn render(frame: &mut Frame, state: &mut State) {
             Constraint::Length(4),
         ])
         .split(area);
-    render_input(frame, chunks[0], state);
+
+    // Grab label gets just the width its own text needs (bordered box,
+    // right-aligned); the query input takes every column left over.
+    let grab_label = grab_label_text(state);
+    let grab_width = grab_label.chars().count() as u16 + 4; // borders(2) + padding(2)
+    let top = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Min(1), Constraint::Length(grab_width)])
+        .split(chunks[0]);
+
+    render_input(frame, top[0], state);
+    render_grab_label(frame, top[1], state, &grab_label);
     render_list(frame, chunks[1], state);
     render_footer_or_banner(frame, chunks[2], state);
+}
+
+/// `grab:<name>` plus the resolved line cap, except for `viewport` -
+/// its capture is the visible screen, not a line count, so a number
+/// there would be misleading. `full` and any custom profile left
+/// unbounded shows `(unbounded)` instead of a number.
+fn grab_label_text(state: &State) -> String {
+    let name = state.grab_cycler.current_name();
+    let profile = state.grab_cycler.current_profile();
+    if profile.source == crate::grab::GrabSource::Viewport {
+        return format!("grab:{name}");
+    }
+    match profile.lines {
+        Some(n) => format!("grab:{name} ({n})"),
+        None => format!("grab:{name} (unbounded)"),
+    }
+}
+
+fn render_grab_label(frame: &mut Frame, area: Rect, state: &State, label: &str) {
+    let p = Paragraph::new(Line::from(Span::styled(
+        label.to_string(),
+        Style::default()
+            .fg(state.theme.accent)
+            .add_modifier(Modifier::BOLD),
+    )))
+    .alignment(ratatui::layout::Alignment::Center)
+    .block(Block::default().borders(Borders::ALL));
+    frame.render_widget(p, area);
 }
 
 fn render_input(frame: &mut Frame, area: Rect, state: &State) {
@@ -877,7 +954,9 @@ fn render_footer(frame: &mut Frame, area: Rect, state: &State) {
         line2.push(Span::styled("Ctrl-A", bold));
         line2.push(Span::raw("/"));
         line2.push(Span::styled("Ctrl-D", bold));
-        line2.push(Span::raw(":select all/none"));
+        line2.push(Span::raw(":select all/none    "));
+        line2.push(Span::styled("Ctrl-G", bold));
+        line2.push(Span::raw(":next grabber"));
     } else {
         line2.push(Span::styled(
             format!("{} selected", state.selected.len()),
@@ -1006,5 +1085,39 @@ mod color_tests {
     fn color_for_tag_falls_back_to_fallback_type_for_custom_pattern() {
         let theme = Theme::resolve(&crate::config::ColorsConfig::default());
         assert_eq!(theme.color_for_tag("jira"), Color::Gray);
+    }
+}
+
+#[cfg(test)]
+mod grab_label_tests {
+    use super::*;
+
+    fn state_at(initial_grab_name: &str) -> State {
+        let config = crate::config::Config::default();
+        let grab_cycler = crate::grab::GrabCycler::new(
+            &config,
+            &HashSet::new(),
+            None,
+            initial_grab_name,
+            "/tmp/socket".to_string(),
+            "pane1".to_string(),
+            "tab1".to_string(),
+        );
+        State::new(Vec::new(), Vec::new(), false, &config, "", grab_cycler)
+    }
+
+    #[test]
+    fn shows_line_cap_for_quick() {
+        assert_eq!(grab_label_text(&state_at("quick")), "grab:quick (150)");
+    }
+
+    #[test]
+    fn shows_unbounded_for_full() {
+        assert_eq!(grab_label_text(&state_at("full")), "grab:full (unbounded)");
+    }
+
+    #[test]
+    fn omits_line_cap_for_viewport() {
+        assert_eq!(grab_label_text(&state_at("viewport")), "grab:viewport");
     }
 }

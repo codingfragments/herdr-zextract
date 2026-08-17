@@ -429,18 +429,67 @@ impl Config {
         }
     }
 
-    /// Allowlist mode, ported from the original's per-keybind
-    /// `patterns` override: only the given tags (built-in or custom
-    /// pattern names) run at all, overriding any `disable` list from
-    /// the config file entirely - not layered on top of it.
-    pub fn restrict_to(&mut self, allowed: &HashSet<String>) {
+    /// Every built-in type tag or custom pattern name *not* in
+    /// `allowed` - allowlist mode, ported from the original's
+    /// per-keybind `patterns` override: only the given tags run at all,
+    /// overriding any `disable` list entirely rather than layering on
+    /// top of it. Pure (returns instead of mutating `self.disabled`) so
+    /// [`Self::disabled_for`] can precompute one disabled-set per
+    /// grabber up front, in [`crate::grab::GrabCycler::new`], without
+    /// needing a `Config` clone per grabber just to call this.
+    fn complement_of(&self, allowed: &HashSet<String>) -> HashSet<String> {
         let mut disabled: HashSet<String> = crate::matcher::TYPE_PRIORITY
             .iter()
             .map(|t| t.tag().to_string())
             .collect();
         disabled.extend(self.custom.iter().map(|cp| cp.name.clone()));
         disabled.retain(|tag| !allowed.contains(tag));
-        self.disabled = disabled;
+        disabled
+    }
+
+    /// The `disabled` set in force for one grab profile: `allowed` (the
+    /// launching profile's `patterns` allowlist) wins outright when
+    /// present, ignoring `raw_disabled`/`grab_disable` entirely -
+    /// "allowlist overrides every disable source, global and
+    /// per-profile alike". With no allowlist, `raw_disabled`
+    /// (`[patterns].disable`) merges with `grab_disable` (that
+    /// profile's own `[grab_profiles.<name>].disable`).
+    pub fn disabled_for(
+        &self,
+        allowed: Option<&HashSet<String>>,
+        raw_disabled: &HashSet<String>,
+        grab_disable: &[String],
+    ) -> HashSet<String> {
+        match allowed {
+            Some(allowed) => self.complement_of(allowed),
+            None => {
+                let mut disabled = raw_disabled.clone();
+                disabled.extend(grab_disable.iter().cloned());
+                disabled
+            }
+        }
+    }
+
+    /// Every grab profile name selectable by `Ctrl-G` cycling, in a
+    /// stable order: the five built-ins
+    /// ([`crate::grab::BUILTIN_PROFILE_NAMES`]) first, then any wholly
+    /// custom names defined under `[grab_profiles.<name>]` (not
+    /// overriding a built-in), sorted alphabetically for determinism -
+    /// `HashMap` iteration order isn't stable across runs otherwise.
+    pub fn cycle_grab_profile_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = crate::grab::BUILTIN_PROFILE_NAMES
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let mut custom: Vec<String> = self
+            .grab_profiles
+            .keys()
+            .filter(|k| !crate::grab::BUILTIN_PROFILE_NAMES.contains(&k.as_str()))
+            .cloned()
+            .collect();
+        custom.sort();
+        names.extend(custom);
+        names
     }
 
     /// Load from `$HERDR_PLUGIN_CONFIG_DIR/config.toml`. Missing file,
@@ -529,32 +578,34 @@ mod tests {
     }
 
     #[test]
-    fn restrict_to_disables_everything_not_allowed() {
-        let mut config = Config::default();
+    fn complement_of_disables_everything_not_allowed() {
+        let config = Config::default();
         let allowed: HashSet<String> = ["url".to_string(), "ipv4".to_string()].into();
-        config.restrict_to(&allowed);
-        assert!(!config.disabled.contains("url"));
-        assert!(!config.disabled.contains("ipv4"));
-        assert!(config.disabled.contains("file"));
-        assert!(config.disabled.contains("secret"));
+        let disabled = config.complement_of(&allowed);
+        assert!(!disabled.contains("url"));
+        assert!(!disabled.contains("ipv4"));
+        assert!(disabled.contains("file"));
+        assert!(disabled.contains("secret"));
     }
 
     #[test]
-    fn restrict_to_overrides_prior_disable_list() {
-        let mut config = Config {
-            disabled: ["url".to_string()].into(),
-            ..Config::default()
-        };
+    fn disabled_for_allowlist_ignores_raw_and_grab_disable() {
+        let config = Config::default();
         let allowed: HashSet<String> = ["url".to_string()].into();
-        config.restrict_to(&allowed);
-        // "url" is now explicitly allowed, so the prior disable of it
-        // must not survive - restrict_to replaces, doesn't layer.
-        assert!(!config.disabled.contains("url"));
+        let raw_disabled: HashSet<String> = ["url".to_string()].into();
+        let grab_disable = vec!["ipv4".to_string()];
+        let disabled = config.disabled_for(Some(&allowed), &raw_disabled, &grab_disable);
+        // "url" is explicitly allowed, so neither raw_disabled nor
+        // grab_disable naming it (or anything else) survives - an
+        // allowlist replaces every disable source outright.
+        assert!(!disabled.contains("url"));
+        assert!(disabled.contains("ipv4")); // not from grab_disable - it's just not in `allowed`
+        assert!(disabled.contains("file"));
     }
 
     #[test]
-    fn restrict_to_keeps_allowed_custom_patterns() {
-        let mut config = Config {
+    fn complement_of_keeps_allowed_custom_patterns() {
+        let config = Config {
             custom: vec![CustomPattern {
                 name: "jira".to_string(),
                 regex: "x".to_string(),
@@ -564,9 +615,20 @@ mod tests {
             ..Config::default()
         };
         let allowed: HashSet<String> = ["jira".to_string()].into();
-        config.restrict_to(&allowed);
-        assert!(!config.disabled.contains("jira"));
-        assert!(config.disabled.contains("url"));
+        let disabled = config.complement_of(&allowed);
+        assert!(!disabled.contains("jira"));
+        assert!(disabled.contains("url"));
+    }
+
+    #[test]
+    fn disabled_for_no_allowlist_merges_raw_and_grab_disable() {
+        let config = Config::default();
+        let raw_disabled: HashSet<String> = ["secret".to_string()].into();
+        let grab_disable = vec!["ipv6".to_string()];
+        let disabled = config.disabled_for(None, &raw_disabled, &grab_disable);
+        assert!(disabled.contains("secret"));
+        assert!(disabled.contains("ipv6"));
+        assert!(!disabled.contains("url"));
     }
 
     #[test]
@@ -681,6 +743,44 @@ mod tests {
         let p = config.resolve_grab_profile("jira-deep");
         assert_eq!(p.source, crate::grab::GrabSource::Tab);
         assert_eq!(p.lines, Some(500));
+    }
+
+    #[test]
+    fn cycle_grab_profile_names_is_just_builtins_with_zero_config() {
+        let config = Config::default();
+        assert_eq!(
+            config.cycle_grab_profile_names(),
+            crate::grab::BUILTIN_PROFILE_NAMES
+                .iter()
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn cycle_grab_profile_names_appends_custom_names_sorted() {
+        let mut config = Config::default();
+        config
+            .grab_profiles
+            .insert("zeta-deep".to_string(), GrabProfileOverride::default());
+        config
+            .grab_profiles
+            .insert("jira-deep".to_string(), GrabProfileOverride::default());
+        let names = config.cycle_grab_profile_names();
+        assert_eq!(&names[..5], crate::grab::BUILTIN_PROFILE_NAMES);
+        // Custom names sorted alphabetically, not HashMap insertion order.
+        assert_eq!(&names[5..], &["jira-deep", "zeta-deep"]);
+    }
+
+    #[test]
+    fn cycle_grab_profile_names_overriding_a_builtin_does_not_duplicate_it() {
+        let mut config = Config::default();
+        config
+            .grab_profiles
+            .insert("deep".to_string(), GrabProfileOverride::default());
+        let names = config.cycle_grab_profile_names();
+        assert_eq!(names.len(), crate::grab::BUILTIN_PROFILE_NAMES.len());
+        assert_eq!(names.iter().filter(|n| n.as_str() == "deep").count(), 1);
     }
 
     #[test]
