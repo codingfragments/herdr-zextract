@@ -8,9 +8,10 @@
 //! this port uses `ratatui`'s standard `CrosstermBackend` instead —
 //! simpler, and gets terminal-resize/cursor handling for free.
 //!
-//! Scope for this phase: fuzzy-filter, `#type` include/exclude tokens,
-//! navigate, and select. No multi-select, preview pane, action menu,
-//! or config-driven colors yet (Phase 4/5).
+//! Scope: fuzzy-filter, `#type` include/exclude tokens, navigate, and
+//! select-with-verb (Enter fires the type's default verb; Ctrl+letter
+//! fires a specific one via `actions::Verb`). No multi-select, preview
+//! pane, or config-driven colors yet (Phase 5).
 
 pub mod fuzzy;
 pub mod query;
@@ -27,6 +28,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
 use ratatui::{Frame, Terminal};
 
+use crate::actions::{self, Verb};
 use crate::matcher::{type_priority_bonus, Match, MatchType, TYPE_PRIORITY};
 use fuzzy::{FuzzyEngine, ScoredMatch};
 use query::ParsedQuery;
@@ -172,9 +174,16 @@ impl State {
     }
 }
 
-/// Run the picker over `matches` as a fullscreen terminal UI. Returns
-/// the selected match, or `None` if the user cancelled (Esc).
-pub fn run(matches: Vec<Match>) -> io::Result<Option<Match>> {
+/// What the user did with the picker: picked a match with a specific
+/// verb (Enter fires the type's default; Ctrl+<letter> fires a
+/// specific one, when allowed for that match's type), or cancelled.
+pub enum PickerResult {
+    Selected(Match, Verb),
+    Cancelled,
+}
+
+/// Run the picker over `matches` as a fullscreen terminal UI.
+pub fn run(matches: Vec<Match>) -> io::Result<PickerResult> {
     let mut state = State::new(matches);
 
     enable_raw_mode()?;
@@ -197,10 +206,20 @@ pub fn run(matches: Vec<Match>) -> io::Result<Option<Match>> {
     result
 }
 
+/// If `verb` is allowed for the currently-highlighted match, returns
+/// the Selected result for it; otherwise `None` (key ignored).
+fn select_with_verb(state: &State, verb: Verb) -> Option<PickerResult> {
+    let m = state.current_match()?;
+    if !actions::is_verb_allowed(m, verb) {
+        return None;
+    }
+    Some(PickerResult::Selected(m.clone(), verb))
+}
+
 fn run_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     state: &mut State,
-) -> io::Result<Option<Match>> {
+) -> io::Result<PickerResult> {
     loop {
         terminal.draw(|f| render(f, state))?;
         state.last_rows = terminal.size()?.height as usize;
@@ -211,9 +230,28 @@ fn run_loop(
         if key.kind != KeyEventKind::Press {
             continue;
         }
+        if key.modifiers.contains(KeyModifiers::CONTROL) {
+            let verb = match key.code {
+                KeyCode::Char('y') => Some(Verb::CopyRaw),
+                KeyCode::Char('i') => Some(Verb::Insert),
+                KeyCode::Char('o') => Some(Verb::Open),
+                KeyCode::Char('e') => Some(Verb::Edit),
+                KeyCode::Char('j') => Some(Verb::Json),
+                _ => None,
+            };
+            if let Some(result) = verb.and_then(|v| select_with_verb(state, v)) {
+                return Ok(result);
+            }
+            continue;
+        }
         match key.code {
-            KeyCode::Esc => return Ok(None),
-            KeyCode::Enter => return Ok(state.current_match().cloned()),
+            KeyCode::Esc => return Ok(PickerResult::Cancelled),
+            KeyCode::Enter => {
+                if let Some(m) = state.current_match() {
+                    let verb = actions::default_verb(m.ty);
+                    return Ok(PickerResult::Selected(m.clone(), verb));
+                }
+            }
             KeyCode::Backspace => {
                 if state.query.pop().is_some() {
                     state.refilter();

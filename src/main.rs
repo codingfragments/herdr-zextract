@@ -1,3 +1,4 @@
+mod actions;
 mod matcher;
 mod picker;
 mod socket_client;
@@ -58,8 +59,11 @@ fn run() -> Result<(), String> {
 
     let selection = picker::run(matches).map_err(|e| format!("picker failed: {e}"))?;
     match selection {
-        Some(m) => println!("[{}] {}", m.ty.tag(), m.display),
-        None => println!("(cancelled)"),
+        picker::PickerResult::Selected(m, verb) => match actions::dispatch(verb, &m, &pane_id) {
+            actions::Outcome::Done(msg) => println!("{msg}"),
+            actions::Outcome::Failed(msg) => println!("error: {msg}"),
+        },
+        picker::PickerResult::Cancelled => println!("(cancelled)"),
     }
     Ok(())
 }
