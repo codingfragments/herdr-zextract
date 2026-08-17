@@ -85,9 +85,10 @@ size, so it's accepted (parses without error) but otherwise ignored.
 
 Toggle the split with `p` (List mode) or `Ctrl-P` (either mode). The
 preview shows up to 3 lines before and after the highlighted match's
-line in the pane it came from, with the match's own line highlighted -
-and within that line, the exact extracted text picked out with an
-inverted highlight, since a match is rarely the whole line.
+line in the pane it came from, with the match's own line in
+`[colors].highlight` - and within that line, the exact extracted text
+picked out in `[colors].accent`, since a match is rarely the whole
+line.
 
 ---
 

@@ -766,8 +766,7 @@ fn render_preview(frame: &mut Frame, area: Rect, state: &State) {
                     .fg(state.theme.highlight)
                     .add_modifier(Modifier::BOLD);
                 let span_style = Style::default()
-                    .fg(state.theme.cursor_fg)
-                    .bg(state.theme.highlight)
+                    .fg(state.theme.accent)
                     .add_modifier(Modifier::BOLD);
                 Line::from(split_at_span(line, ctx.span_chars, base, span_style))
             } else {
