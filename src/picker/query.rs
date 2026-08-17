@@ -31,6 +31,11 @@ pub struct ParsedQuery {
 /// tokens against `known_tags` by exact-or-unique-prefix match.
 ///
 /// Token forms recognized:
+///   - `#`        (the whole query, nothing else) → passthrough, no
+///     filter, no fuzzy text. Mid-typing a tag filter shouldn't fuzzy-
+///     match the literal `#` character against scrollback lines (e.g.
+///     `#`-prefixed comment lines), which would otherwise reorder/hide
+///     results out from under someone about to type `#url`.
 ///   - `#X`       include filter, prefix-resolved
 ///   - `#!X`      exclude filter, prefix-resolved
 ///   - `##X`      escape: emit literal `#X` as fuzzy text
@@ -39,6 +44,10 @@ pub struct ParsedQuery {
 /// Ambiguous prefix (multiple tags match) or unknown prefix (no tag
 /// matches) → falls back to fuzzy (the literal `#…` text).
 pub fn parse_query(text: &str, known_tags: &[&str]) -> ParsedQuery {
+    if text.trim() == "#" {
+        return ParsedQuery::default();
+    }
+
     let mut out = ParsedQuery::default();
     let mut fuzzy_parts: Vec<&str> = Vec::new();
 
@@ -212,9 +221,27 @@ mod tests {
     }
 
     #[test]
-    fn bare_hash_is_literal() {
+    fn bare_hash_with_other_text_is_literal() {
         let p = parse("# alone");
         assert_eq!(p.fuzzy, "# alone");
+    }
+
+    #[test]
+    fn single_bare_hash_is_passthrough_not_fuzzy() {
+        // Mid-typing a tag filter ("#" on the way to "#url") shouldn't
+        // fuzzy-match the literal "#" character - that would reorder or
+        // hide results (e.g. "#"-prefixed comment lines) before the tag
+        // is even fully typed.
+        let p = parse("#");
+        assert!(p.includes.is_empty());
+        assert!(p.excludes.is_empty());
+        assert!(p.fuzzy.is_empty());
+    }
+
+    #[test]
+    fn single_bare_hash_with_surrounding_whitespace_is_passthrough() {
+        let p = parse("  #  ");
+        assert!(p.fuzzy.is_empty());
     }
 
     #[test]
