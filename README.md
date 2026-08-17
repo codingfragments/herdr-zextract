@@ -67,9 +67,9 @@ cd herdr-zextract
 cargo build --release
 ```
 
-Supported targets: `aarch64-apple-darwin`, `x86_64-apple-darwin`,
-`x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`. Tagged releases
-ship prebuilt binaries for all four via GitHub Actions — see
+Supported targets: `aarch64-apple-darwin`, `x86_64-unknown-linux-gnu`,
+`aarch64-unknown-linux-gnu`. Tagged releases ship prebuilt binaries for
+all three via GitHub Actions — see
 [PLANNING.md §9](PLANNING.md#9-ci--release-plan-github-actions).
 
 ## Install
@@ -110,8 +110,10 @@ first.
 
 ## Platform support
 
-Built and tested for macOS (Apple Silicon + Intel) and Linux (x86_64 +
-aarch64). No Windows support planned.
+Built and tested for macOS (Apple Silicon) and Linux (x86_64 +
+aarch64). No Windows support planned. No Intel Mac (`x86_64-apple-darwin`)
+release binary - build from source with `cargo build --release` if
+needed on that architecture.
 
 ## License
 

@@ -13,10 +13,11 @@ jobs:
         include:
           # Native runners only - no cross/QEMU needed for any target
           # (see PLANNING.md §12's confirmed-live aarch64-linux finding).
+          # No x86_64-apple-darwin (Intel Mac) - not worth the CI minutes
+          # for a platform with negligible remaining install base among
+          # this plugin's users; build from source there instead.
           - os: macos-14
             target: aarch64-apple-darwin
-          - os: macos-13
-            target: x86_64-apple-darwin
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
           - os: ubuntu-24.04-arm
