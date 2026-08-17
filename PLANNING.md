@@ -330,6 +330,23 @@ user-defined/custom patterns (built-ins only for now).
 4. Confirm the popup lists all three matches with correct type labels,
    and ignores unrelated scrollback lines.
 
+**Done (verified 2026-08-17):** ported directly from the original repo's
+`crates/zextract/src/{extract.rs,pattern/*.rs}` (fetched via `gh api`) —
+url/uuid/ipv4/ipv6/quoted/sha/diagnostic/file/git/secret ported near
+verbatim including their unit tests (94 pass standalone), plus `extract`'s
+two-pass dedup (`dedup_keep_latest`, `dedup_by_raw_priority`) and
+`TYPE_PRIORITY`. Two deliberate scope cuts vs. the original, both safe
+because they're off-by-default there too:
+  - `command`'s opt-in flag/comment/extension-anchored passes were not
+    ported — only the default-on prompt-anchored + exec-anchored core.
+  - Per-pattern `ExtractionTimings` and `PatternsConfig` (disabled-type
+    set, custom patterns, command/secret tuning) deferred to Phase 5 —
+    `secret`'s `entropy_filter` and `command`'s `rprompt_min_spaces` are
+    hardcoded to their upstream defaults (`true`, `5`) for now.
+Verified live: real scrollback containing a URL, a file:line:col, a
+UUID, a bare SHA, and an AWS key all round-tripped through
+`pane.read` → `matcher::extract` → popup correctly.
+
 ### Phase 3 — Picker UI
 
 **Prompt:** Wire the Phase 2 match list into the original plugin's
