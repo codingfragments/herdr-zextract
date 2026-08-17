@@ -229,7 +229,7 @@ impl Default for UiConfig {
 }
 
 fn default_preview_open_width() -> String {
-    "90%".to_string()
+    "40%".to_string()
 }
 
 fn default_preview_closed_width() -> String {

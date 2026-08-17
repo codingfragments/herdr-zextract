@@ -702,7 +702,7 @@ fn render(frame: &mut Frame, state: &mut State) {
         // OS-level popup pane); the preview takes whatever's left.
         // `preview_closed_width` has no effect - closed means no split
         // at all, so there's nothing for it to size.
-        let list_width = width_constraint(&state.config.ui.preview_open_width, 90);
+        let list_width = width_constraint(&state.config.ui.preview_open_width, 40);
         let middle = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([list_width, Constraint::Min(1)])

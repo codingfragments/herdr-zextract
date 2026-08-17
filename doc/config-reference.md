@@ -58,14 +58,14 @@ in the same file that failed to parse.
 ```toml
 [ui]
 preview = "off"                # default
-preview_open_width = "90%"     # default
+preview_open_width = "40%"     # default
 preview_closed_width = "70%"   # default
 ```
 
 | Key | Description |
 |---|---|
 | `preview` | Preview pane state at launch. `"off"` = closed (default), `"auto"` = closed (see note below), `"always"` = open. Overridden per keybind by `[profiles.<name>].preview` when set. |
-| `preview_open_width` | The list column's width while the preview is open - a percent string (`"90%"`) or a bare cell count (`"120"`). The preview column takes whatever's left. |
+| `preview_open_width` | The list column's width while the preview is open - a percent string (`"40%"`) or a bare cell count (`"120"`). The preview column takes whatever's left (60% by default). |
 | `preview_closed_width` | Has no effect (see note below). |
 
 **Note on `"auto"`:** the original remembers the previous session's

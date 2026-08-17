@@ -23,7 +23,7 @@
 # live-resize equivalent for the real popup exists here (unlike the
 # original), so preview_closed_width is accepted but has no effect -
 # see doc/config-reference.md.
-# preview_open_width = "90%"
+# preview_open_width = "40%"
 # preview_closed_width = "70%"
 
 [patterns]
