@@ -21,7 +21,6 @@
 use std::process::Command;
 
 use crate::matcher::{Match, MatchType};
-use crate::socket_client::SocketClient;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Verb {
@@ -152,12 +151,6 @@ pub enum Outcome {
 
 /// Run `verb` against `m`. `source_pane_id` is required for
 /// insert/insert-display, sent back to that pane over `pane.send_text`.
-///
-/// Insert opens a **fresh** socket connection rather than reusing one
-/// held from earlier in the process's life: the picker session between
-/// launch and a user's keypress can run long enough (real typing/
-/// thinking time) that a connection opened before it goes stale on the
-/// server side, surfacing as "Broken pipe" — found by manual testing.
 pub fn dispatch(verb: Verb, m: &Match, source_pane_id: &str) -> Outcome {
     if !is_verb_allowed(m, verb) {
         return Outcome::Failed(format!(
@@ -264,11 +257,8 @@ fn insert_text(text: &str, source_pane_id: &str) -> Outcome {
         Ok(p) => p,
         Err(_) => return Outcome::Failed("HERDR_SOCKET_PATH is not set".to_string()),
     };
-    let mut socket = match SocketClient::connect(&socket_path) {
-        Ok(s) => s,
-        Err(e) => return Outcome::Failed(format!("failed to connect to {socket_path}: {e}")),
-    };
-    match socket.request(
+    match crate::socket_client::request(
+        &socket_path,
         "pane.send_text",
         serde_json::json!({"pane_id": source_pane_id, "text": text}),
     ) {

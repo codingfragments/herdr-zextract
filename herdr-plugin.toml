@@ -2,6 +2,7 @@ id = "herdr-zextract"
 name = "herdr-zextract"
 version = "0.1.0"
 min_herdr_version = "0.8.0"
+platforms = ["macos", "linux"]
 
 [[build]]
 command = ["cargo", "build", "--release"]
@@ -13,3 +14,90 @@ command = ["./target/release/herdr-zextract"]
 placement = "popup"
 width = "70%"
 height = "70%"
+
+# Launcher actions: each is a thin invocation of `herdr plugin pane
+# open` for the "zextract" pane above, selecting a named *profile* via
+# --env ZEXTRACT_PROFILE - the profile's actual grab scope/pattern
+# allowlist/query pre-fill live in the user's own config.toml under
+# [profiles.<name>], never here (see doc/config-reference.md). Actions
+# run headlessly (no real PTY - confirmed live), so they can't be the
+# popup itself; they just fire the real popup open, which does get a
+# real PTY. Bind a key to each action's id via a `[[keys.command]]`
+# entry with `type = "plugin_action"` in your own
+# ~/.config/herdr/config.toml - see doc/keybinding.md.
+
+[[actions]]
+id = "zextract-open"
+title = "zextract: current pane"
+command = ["herdr", "plugin", "pane", "open", "--plugin", "herdr-zextract", "--entrypoint", "zextract", "--env", "ZEXTRACT_PROFILE=open"]
+
+[[actions]]
+id = "zextract-tab"
+title = "zextract: whole tab"
+command = ["herdr", "plugin", "pane", "open", "--plugin", "herdr-zextract", "--entrypoint", "zextract", "--env", "ZEXTRACT_PROFILE=tab"]
+
+[[actions]]
+id = "zextract-url"
+title = "zextract: URLs/IPs only, current pane"
+command = ["herdr", "plugin", "pane", "open", "--plugin", "herdr-zextract", "--entrypoint", "zextract", "--env", "ZEXTRACT_PROFILE=url"]
+
+[[actions]]
+id = "zextract-url-tab"
+title = "zextract: URLs/IPs only, whole tab"
+command = ["herdr", "plugin", "pane", "open", "--plugin", "herdr-zextract", "--entrypoint", "zextract", "--env", "ZEXTRACT_PROFILE=url-tab"]
+
+# Ten free-form slots for whatever combination the built-in four don't
+# cover - define a matching [profiles.customN] block in your own
+# config.toml (grab scope, pattern allowlist, query pre-fill) and bind
+# a key to the zextract-customN action with that same N. Undefined
+# customN profiles just fall back to plain defaults (quick grab, no
+# pattern restriction), so binding one before configuring it is safe.
+[[actions]]
+id = "zextract-custom0"
+title = "zextract: custom profile 0"
+command = ["herdr", "plugin", "pane", "open", "--plugin", "herdr-zextract", "--entrypoint", "zextract", "--env", "ZEXTRACT_PROFILE=custom0"]
+
+[[actions]]
+id = "zextract-custom1"
+title = "zextract: custom profile 1"
+command = ["herdr", "plugin", "pane", "open", "--plugin", "herdr-zextract", "--entrypoint", "zextract", "--env", "ZEXTRACT_PROFILE=custom1"]
+
+[[actions]]
+id = "zextract-custom2"
+title = "zextract: custom profile 2"
+command = ["herdr", "plugin", "pane", "open", "--plugin", "herdr-zextract", "--entrypoint", "zextract", "--env", "ZEXTRACT_PROFILE=custom2"]
+
+[[actions]]
+id = "zextract-custom3"
+title = "zextract: custom profile 3"
+command = ["herdr", "plugin", "pane", "open", "--plugin", "herdr-zextract", "--entrypoint", "zextract", "--env", "ZEXTRACT_PROFILE=custom3"]
+
+[[actions]]
+id = "zextract-custom4"
+title = "zextract: custom profile 4"
+command = ["herdr", "plugin", "pane", "open", "--plugin", "herdr-zextract", "--entrypoint", "zextract", "--env", "ZEXTRACT_PROFILE=custom4"]
+
+[[actions]]
+id = "zextract-custom5"
+title = "zextract: custom profile 5"
+command = ["herdr", "plugin", "pane", "open", "--plugin", "herdr-zextract", "--entrypoint", "zextract", "--env", "ZEXTRACT_PROFILE=custom5"]
+
+[[actions]]
+id = "zextract-custom6"
+title = "zextract: custom profile 6"
+command = ["herdr", "plugin", "pane", "open", "--plugin", "herdr-zextract", "--entrypoint", "zextract", "--env", "ZEXTRACT_PROFILE=custom6"]
+
+[[actions]]
+id = "zextract-custom7"
+title = "zextract: custom profile 7"
+command = ["herdr", "plugin", "pane", "open", "--plugin", "herdr-zextract", "--entrypoint", "zextract", "--env", "ZEXTRACT_PROFILE=custom7"]
+
+[[actions]]
+id = "zextract-custom8"
+title = "zextract: custom profile 8"
+command = ["herdr", "plugin", "pane", "open", "--plugin", "herdr-zextract", "--entrypoint", "zextract", "--env", "ZEXTRACT_PROFILE=custom8"]
+
+[[actions]]
+id = "zextract-custom9"
+title = "zextract: custom profile 9"
+command = ["herdr", "plugin", "pane", "open", "--plugin", "herdr-zextract", "--entrypoint", "zextract", "--env", "ZEXTRACT_PROFILE=custom9"]

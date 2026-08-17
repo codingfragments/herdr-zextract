@@ -8,11 +8,15 @@
 //! `herdr-plugin.toml`) is TOML, so this port uses TOML too for
 //! consistency with the host it's actually running under.
 //!
+//! Also carries `[profiles.<name>]` (Phase 7): per-keybind grab scope,
+//! pattern allowlist, and query pre-fill, selected at launch by
+//! `ZEXTRACT_PROFILE` - see `doc/config-reference.md`.
+//!
 //! Not ported (out of scope for this phase, see PLANNING.md §11 Phase 5):
-//! `ui`, `colors`, `grab`, `limits`, `types`, `actions` blocks - those
-//! configure UI/action-template/scrollback-depth surfaces this port
-//! hasn't built yet. Live reload is also out of scope - config is read
-//! once per invocation, matching the original's snapshot-once model.
+//! `ui`, `colors`, `limits`, `types`, `actions` blocks - those configure
+//! UI/action-template surfaces this port hasn't built yet. Live reload
+//! is also out of scope - config is read once per invocation, matching
+//! the original's snapshot-once model.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -72,6 +76,60 @@ fn default_true() -> bool {
 struct RawConfig {
     #[serde(default)]
     patterns: PatternsSection,
+    #[serde(default)]
+    profiles: std::collections::HashMap<String, Profile>,
+}
+
+/// Per-keybind override bundle, selected at runtime by `ZEXTRACT_PROFILE`
+/// and defined by name under `[profiles.<name>]` in the user's own
+/// `config.toml` — the launcher action in `herdr-plugin.toml` only ever
+/// picks a profile *name*, never the grab/pattern values themselves, so
+/// tuning a keybind's behavior never requires touching plugin packaging.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct Profile {
+    /// Grab profile name (`quick`/`deep`/`viewport`/`full`/`tab-scan`).
+    /// `None` defers to this profile's built-in default, if any, else
+    /// `grab::resolve`'s own fallback (`quick`).
+    pub grab: Option<String>,
+    /// Allowlist of type tags to extract at all, overriding `[patterns]`
+    /// `disable` entirely for this invocation. `None` means no
+    /// restriction (the config file's own `disable` list still applies).
+    pub patterns: Option<Vec<String>>,
+    /// Type tags to pre-fill the picker query with as `#tag` filters.
+    pub type_filter: Option<Vec<String>>,
+}
+
+/// Built-in defaults for the four named profiles the plugin ships
+/// actions for, so they work with zero user config (matching the
+/// README's "works with zero config" claim) — a `[profiles.<name>]`
+/// block in the user's own config.toml overrides these entirely, not
+/// merges with them.
+fn builtin_profile(name: &str) -> Option<Profile> {
+    match name {
+        "open" => Some(Profile::default()),
+        "tab" => Some(Profile {
+            grab: Some("tab-scan".to_string()),
+            ..Profile::default()
+        }),
+        "url" => Some(Profile {
+            patterns: Some(vec![
+                "url".to_string(),
+                "ipv4".to_string(),
+                "ipv6".to_string(),
+            ]),
+            ..Profile::default()
+        }),
+        "url-tab" => Some(Profile {
+            grab: Some("tab-scan".to_string()),
+            patterns: Some(vec![
+                "url".to_string(),
+                "ipv4".to_string(),
+                "ipv6".to_string(),
+            ]),
+            ..Profile::default()
+        }),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -82,6 +140,7 @@ pub struct Config {
     /// curated-format regexes (which always run regardless).
     pub secret_entropy_filter: bool,
     pub custom: Vec<CustomPattern>,
+    pub profiles: std::collections::HashMap<String, Profile>,
 }
 
 impl Default for Config {
@@ -90,11 +149,40 @@ impl Default for Config {
             disabled: HashSet::new(),
             secret_entropy_filter: true,
             custom: Vec::new(),
+            profiles: std::collections::HashMap::new(),
         }
     }
 }
 
 impl Config {
+    /// Resolve `name` (from `ZEXTRACT_PROFILE`) to a [`Profile`]: the
+    /// user's own `[profiles.<name>]` config wins if present, else one
+    /// of the four built-in named defaults, else an all-defaults
+    /// profile (plain `quick` grab, no pattern restriction) — an
+    /// unrecognized custom profile name degrades gracefully rather than
+    /// failing the launch.
+    pub fn resolve_profile(&self, name: &str) -> Profile {
+        self.profiles
+            .get(name)
+            .cloned()
+            .or_else(|| builtin_profile(name))
+            .unwrap_or_default()
+    }
+
+    /// Allowlist mode, ported from the original's per-keybind
+    /// `patterns` override: only the given tags (built-in or custom
+    /// pattern names) run at all, overriding any `disable` list from
+    /// the config file entirely - not layered on top of it.
+    pub fn restrict_to(&mut self, allowed: &HashSet<String>) {
+        let mut disabled: HashSet<String> = crate::matcher::TYPE_PRIORITY
+            .iter()
+            .map(|t| t.tag().to_string())
+            .collect();
+        disabled.extend(self.custom.iter().map(|cp| cp.name.clone()));
+        disabled.retain(|tag| !allowed.contains(tag));
+        self.disabled = disabled;
+    }
+
     /// Load from `$HERDR_PLUGIN_CONFIG_DIR/config.toml`. Missing file,
     /// unset env var, or a parse error all fall back to
     /// `Config::default()` (all built-ins on, no custom patterns) - a
@@ -113,6 +201,7 @@ impl Config {
                 disabled: raw.patterns.disable.into_iter().collect(),
                 secret_entropy_filter: raw.patterns.secret.entropy_filter,
                 custom: raw.patterns.custom,
+                profiles: raw.profiles,
             },
             Err(e) => {
                 eprintln!("herdr-zextract: failed to parse {}: {e}", path.display());
@@ -153,4 +242,113 @@ pub fn write_default() -> Result<PathBuf, String> {
         .and_then(|mut f| std::io::Write::write_all(&mut f, DEFAULT_CONFIG_TOML.as_bytes()))
         .map_err(|e| format!("failed to write {}: {e}", path.display()))?;
     Ok(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn restrict_to_disables_everything_not_allowed() {
+        let mut config = Config::default();
+        let allowed: HashSet<String> = ["url".to_string(), "ipv4".to_string()].into();
+        config.restrict_to(&allowed);
+        assert!(!config.disabled.contains("url"));
+        assert!(!config.disabled.contains("ipv4"));
+        assert!(config.disabled.contains("file"));
+        assert!(config.disabled.contains("secret"));
+    }
+
+    #[test]
+    fn restrict_to_overrides_prior_disable_list() {
+        let mut config = Config {
+            disabled: ["url".to_string()].into(),
+            ..Config::default()
+        };
+        let allowed: HashSet<String> = ["url".to_string()].into();
+        config.restrict_to(&allowed);
+        // "url" is now explicitly allowed, so the prior disable of it
+        // must not survive - restrict_to replaces, doesn't layer.
+        assert!(!config.disabled.contains("url"));
+    }
+
+    #[test]
+    fn restrict_to_keeps_allowed_custom_patterns() {
+        let mut config = Config {
+            custom: vec![CustomPattern {
+                name: "jira".to_string(),
+                regex: "x".to_string(),
+                ty: "url".to_string(),
+                template: None,
+            }],
+            ..Config::default()
+        };
+        let allowed: HashSet<String> = ["jira".to_string()].into();
+        config.restrict_to(&allowed);
+        assert!(!config.disabled.contains("jira"));
+        assert!(config.disabled.contains("url"));
+    }
+
+    #[test]
+    fn resolve_profile_uses_builtin_defaults_with_zero_config() {
+        let config = Config::default();
+        assert_eq!(config.resolve_profile("open").grab, None);
+        assert_eq!(
+            config.resolve_profile("tab").grab,
+            Some("tab-scan".to_string())
+        );
+        assert_eq!(
+            config.resolve_profile("url").patterns,
+            Some(vec![
+                "url".to_string(),
+                "ipv4".to_string(),
+                "ipv6".to_string()
+            ])
+        );
+        assert_eq!(
+            config.resolve_profile("url-tab").grab,
+            Some("tab-scan".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_profile_unknown_name_degrades_to_plain_default() {
+        let config = Config::default();
+        let profile = config.resolve_profile("custom0");
+        assert_eq!(profile.grab, None);
+        assert_eq!(profile.patterns, None);
+        assert_eq!(profile.type_filter, None);
+    }
+
+    #[test]
+    fn resolve_profile_user_config_overrides_builtin_entirely() {
+        let mut config = Config::default();
+        config.profiles.insert(
+            "tab".to_string(),
+            Profile {
+                grab: Some("deep".to_string()),
+                ..Profile::default()
+            },
+        );
+        let profile = config.resolve_profile("tab");
+        // The built-in "tab" default is grab="tab-scan" - a user
+        // override must replace it outright, not merge with it.
+        assert_eq!(profile.grab, Some("deep".to_string()));
+    }
+
+    #[test]
+    fn resolve_profile_user_config_defines_custom_slot() {
+        let mut config = Config::default();
+        config.profiles.insert(
+            "custom0".to_string(),
+            Profile {
+                grab: Some("deep".to_string()),
+                patterns: Some(vec!["secret".to_string()]),
+                type_filter: None,
+            },
+        );
+        let profile = config.resolve_profile("custom0");
+        assert_eq!(profile.grab, Some("deep".to_string()));
+        assert_eq!(profile.patterns, Some(vec!["secret".to_string()]));
+    }
 }

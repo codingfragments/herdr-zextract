@@ -27,3 +27,35 @@ entropy_filter = true
 # regex = "([A-Z]+)-([0-9]+)"
 # type = "url"
 # template = "https://jira.example.com/browse/{1}-{2}"
+
+# Named profiles, selected at launch by the keybind action's
+# ZEXTRACT_PROFILE env var (see herdr-plugin.toml / doc/keybinding.md).
+# Each bundles a grab scope, a pattern allowlist, and a query pre-fill
+# - this is the layer you're meant to tune per keybind, not
+# herdr-plugin.toml itself.
+#
+# "open", "tab", "url", and "url-tab" already work with zero config
+# here (built-in defaults matching the shipped zextract-open/-tab/-url/
+# -url-tab actions) - only add a block below to override one.
+#
+# [profiles.open]
+# grab = "quick"          # quick | deep | viewport | full | tab-scan
+#
+# [profiles.tab]
+# grab = "tab-scan"
+#
+# [profiles.url]
+# patterns = ["url", "ipv4", "ipv6"]
+#
+# [profiles.url-tab]
+# grab = "tab-scan"
+# patterns = ["url", "ipv4", "ipv6"]
+#
+# Ten free slots (custom0..custom9) with no built-in default - bind a
+# key to the matching zextract-customN action in herdr-plugin.toml,
+# then define whatever combination you want here. Example: secrets
+# only, deep scrollback, current pane.
+#
+# [profiles.custom0]
+# grab = "deep"
+# patterns = ["secret"]
