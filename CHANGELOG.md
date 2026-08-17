@@ -5,6 +5,21 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-08-18
+
+### Changed
+
+- `url`/`url-tab` built-in profiles now default to `preview = "on"` -
+  matches for these are always short (a URL/IP), so the preview's
+  ±3-line context is cheap to show and usually worth it. `open`/`tab`
+  are unchanged, staying on `[ui].preview`'s off default.
+
+### Fixed
+
+- Removed the trailing "-- press Enter to close --" prompt after an
+  action - a Phase 1 debug leftover from before the picker existed.
+  The popup now closes immediately once an action completes.
+
 ## [0.1.0] - 2026-08-18
 
 First release: a Herdr port of the `zellij-zextract` plugin, reaching
@@ -59,4 +74,5 @@ plus a few Herdr-native additions.
   internal split of the picker's own fixed render area instead (see
   `doc/config-reference.md`'s `[ui]` section for why).
 
+[0.1.1]: https://github.com/codingfragments/herdr-zextract/releases/tag/v0.1.1
 [0.1.0]: https://github.com/codingfragments/herdr-zextract/releases/tag/v0.1.0
