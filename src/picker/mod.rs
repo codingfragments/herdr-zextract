@@ -761,14 +761,21 @@ fn render_preview(frame: &mut Frame, area: Rect, state: &State) {
         .iter()
         .enumerate()
         .map(|(i, line)| {
-            let style = if i == ctx.current {
-                Style::default()
+            if i == ctx.current {
+                let base = Style::default()
                     .fg(state.theme.highlight)
-                    .add_modifier(Modifier::BOLD)
+                    .add_modifier(Modifier::BOLD);
+                let span_style = Style::default()
+                    .fg(state.theme.cursor_fg)
+                    .bg(state.theme.highlight)
+                    .add_modifier(Modifier::BOLD);
+                Line::from(split_at_span(line, ctx.span_chars, base, span_style))
             } else {
-                Style::default().fg(state.theme.muted)
-            };
-            Line::from(Span::styled(line.to_string(), style))
+                Line::from(Span::styled(
+                    line.to_string(),
+                    Style::default().fg(state.theme.muted),
+                ))
+            }
         })
         .collect();
     let p = Paragraph::new(lines).block(block);
@@ -1100,6 +1107,44 @@ fn truncate_display(s: &str, max_chars: usize, middle: bool) -> String {
     }
 }
 
+/// Splits `line` into up to 3 spans around the char-index range
+/// `span_chars`: `base` style everywhere, `span_style` for the range
+/// itself. Used by [`render_preview`] to pick the exact extracted
+/// finding out of its already-highlighted current line - an empty or
+/// out-of-range `span_chars` (`start >= end`) just returns `line`
+/// entirely in `base`.
+fn split_at_span(
+    line: &str,
+    span_chars: (usize, usize),
+    base: Style,
+    span_style: Style,
+) -> Vec<Span<'static>> {
+    let (start, end) = span_chars;
+    if start >= end {
+        return vec![Span::styled(line.to_string(), base)];
+    }
+    let chars: Vec<char> = line.chars().collect();
+    let start = start.min(chars.len());
+    let end = end.min(chars.len());
+    let mut spans = Vec::new();
+    if start > 0 {
+        spans.push(Span::styled(
+            chars[..start].iter().collect::<String>(),
+            base,
+        ));
+    }
+    if end > start {
+        spans.push(Span::styled(
+            chars[start..end].iter().collect::<String>(),
+            span_style,
+        ));
+    }
+    if end < chars.len() {
+        spans.push(Span::styled(chars[end..].iter().collect::<String>(), base));
+    }
+    spans
+}
+
 /// Ported from the original `main.rs::highlight_spans` verbatim.
 fn highlight_spans(display: &str, indices: &[u32], color: Color) -> Vec<Span<'static>> {
     if indices.is_empty() {
@@ -1267,5 +1312,54 @@ mod width_constraint_tests {
     #[test]
     fn trims_surrounding_whitespace() {
         assert_eq!(width_constraint(" 90% ", 70), Constraint::Percentage(90));
+    }
+}
+
+#[cfg(test)]
+mod split_at_span_tests {
+    use super::*;
+
+    fn plain(text: &str) -> Span<'static> {
+        Span::styled(text.to_string(), Style::default())
+    }
+
+    #[test]
+    fn splits_around_a_middle_span() {
+        let base = Style::default();
+        let span_style = Style::default().add_modifier(Modifier::BOLD);
+        let spans = split_at_span("see https://x.com end", (4, 17), base, span_style);
+        assert_eq!(spans.len(), 3);
+        assert_eq!(spans[0].content, "see ");
+        assert_eq!(spans[1].content, "https://x.com");
+        assert_eq!(spans[1].style, span_style);
+        assert_eq!(spans[2].content, " end");
+    }
+
+    #[test]
+    fn span_at_the_very_start_has_no_leading_segment() {
+        let spans = split_at_span("abc", (0, 1), Style::default(), Style::default());
+        assert_eq!(spans.len(), 2);
+        assert_eq!(spans[0].content, "a");
+        assert_eq!(spans[1].content, "bc");
+    }
+
+    #[test]
+    fn span_at_the_very_end_has_no_trailing_segment() {
+        let spans = split_at_span("abc", (2, 3), Style::default(), Style::default());
+        assert_eq!(spans.len(), 2);
+        assert_eq!(spans[0].content, "ab");
+        assert_eq!(spans[1].content, "c");
+    }
+
+    #[test]
+    fn empty_span_returns_whole_line_unstyled_by_span_style() {
+        let spans = split_at_span("abc", (0, 0), Style::default(), Style::default());
+        assert_eq!(spans, vec![plain("abc")]);
+    }
+
+    #[test]
+    fn out_of_range_span_is_treated_as_empty() {
+        let spans = split_at_span("abc", (5, 2), Style::default(), Style::default());
+        assert_eq!(spans, vec![plain("abc")]);
     }
 }
