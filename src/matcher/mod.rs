@@ -173,3 +173,128 @@ fn dedup_by_raw_priority(matches: Vec<Match>) -> Vec<Match> {
     out.sort_by_key(|m| std::cmp::Reverse(m.span.0));
     out
 }
+
+#[cfg(test)]
+mod fixture_tests {
+    //! Integration coverage ported from the original plugin's
+    //! `fixture_tests` module: read each fixture file and assert minimum
+    //! counts per type against the combined `extract()` pipeline. Lighter
+    //! than snapshot diffing but catches cross-pattern regressions that
+    //! per-module unit tests can't (a match getting stolen by dedup, a
+    //! pattern silently ceasing to fire on realistic multi-line text).
+    //!
+    //! `multi_group_patterns.txt` / `custom_patterns.txt` and their tests
+    //! are not ported — they require `PatternsConfig` custom patterns,
+    //! deferred to Phase 5.
+    use super::*;
+
+    fn count_by_type(text: &str, ty: MatchType) -> usize {
+        extract(text).into_iter().filter(|m| m.ty == ty).count()
+    }
+
+    #[test]
+    fn urls_fixture_has_urls() {
+        let text = include_str!("../../tests/fixtures/urls.txt");
+        assert!(count_by_type(text, MatchType::Url) >= 5);
+    }
+
+    #[test]
+    fn files_fixture_has_files() {
+        let text = include_str!("../../tests/fixtures/files.txt");
+        assert!(count_by_type(text, MatchType::File) >= 3);
+    }
+
+    #[test]
+    fn diagnostics_fixture_has_diagnostics() {
+        let text = include_str!("../../tests/fixtures/diagnostics.txt");
+        assert!(count_by_type(text, MatchType::Diagnostic) >= 2);
+    }
+
+    #[test]
+    fn git_log_fixture_has_git_matches() {
+        let text = include_str!("../../tests/fixtures/git_log.txt");
+        assert!(count_by_type(text, MatchType::Git) >= 5);
+    }
+
+    #[test]
+    fn commands_fixture_has_commands() {
+        // Original asserts >=5 with flag/comment/extension-anchored also
+        // enabled; those passes aren't ported (Phase 5), so this checks
+        // the prompt+exec-anchored core still finds a healthy share.
+        let text = include_str!("../../tests/fixtures/commands.txt");
+        assert!(count_by_type(text, MatchType::Command) >= 3);
+    }
+
+    #[test]
+    fn secrets_fixture_has_secrets() {
+        let text = include_str!("../../tests/fixtures/secrets.txt");
+        let matches = extract(text);
+        let secrets: Vec<_> = matches
+            .iter()
+            .filter(|m| m.ty == MatchType::Secret)
+            .collect();
+        assert!(secrets.len() >= 7, "got {} secrets", secrets.len());
+        let formats: std::collections::HashSet<&str> = secrets
+            .iter()
+            .filter_map(|m| m.fields.get("secret_format").map(|s| s.as_str()))
+            .collect();
+        for required in ["jwt", "aws", "github", "gitlab", "stripe", "bearer"] {
+            assert!(formats.contains(required), "missing format: {required}");
+        }
+    }
+
+    #[test]
+    fn realworld_fixture_finds_diverse_types() {
+        let text = include_str!("../../tests/fixtures/realworld.txt");
+        let matches = extract(text);
+        let types: HashSet<MatchType> = matches.iter().map(|m| m.ty).collect();
+        assert!(types.len() >= 5, "got types: {types:?}");
+    }
+
+    #[test]
+    fn adversarial_fixture_rejects_near_misses() {
+        let text = include_str!("../../tests/fixtures/adversarial.txt");
+        let matches = extract(text);
+        // No SHA from "12345678" (pure-numeric).
+        assert!(!matches
+            .iter()
+            .any(|m| m.ty == MatchType::Sha && m.raw == "12345678"));
+        // No IPv4 from "999.1.1.1".
+        assert!(!matches
+            .iter()
+            .any(|m| m.ty == MatchType::Ipv4 && m.raw.starts_with("999.")));
+    }
+
+    #[test]
+    fn stress_fixture_dense_mixed_corpus() {
+        // 260+ line realistic transcript — exercises the "many matches
+        // across many types" path.
+        let text = include_str!("../../tests/fixtures/stress.txt");
+        let matches = extract(text);
+        let types: HashSet<MatchType> = matches.iter().map(|m| m.ty).collect();
+
+        assert!(
+            types.len() >= 7,
+            "stress fixture should exercise >=7 types, got {} ({:?})",
+            types.len(),
+            types
+        );
+        assert!(
+            matches.len() >= 40,
+            "stress fixture should yield >=40 matches, got {}",
+            matches.len()
+        );
+        for required in [
+            MatchType::Url,
+            MatchType::File,
+            MatchType::Command,
+            MatchType::Sha,
+            MatchType::Secret,
+        ] {
+            assert!(
+                matches.iter().any(|m| m.ty == required),
+                "stress fixture missing required type {required:?}"
+            );
+        }
+    }
+}
