@@ -281,9 +281,13 @@ one, or to define a wholly new name for `[profiles.<name>]` to select.
 and re-extract with the next grab profile, in the order above followed
 by any wholly custom names you've defined here (sorted alphabetically)
 - e.g. quick → deep → viewport → full → tab-scan → jira-deep → quick.
-The active grabber's name shows to the right of the query field. A
-failed re-capture (e.g. a closed pane) leaves the current matches and
-displayed name untouched rather than clearing the list.
+The active grabber shows in its own box to the right of the query
+field, e.g. `grab:quick (150)` - the resolved line cap is shown for
+every source except `viewport` (a screen capture, not a line count);
+an unbounded profile (`full`, or any custom one with no `lines` set)
+shows `(unbounded)` instead of a number. A failed re-capture (e.g. a
+closed pane) leaves the current matches and displayed name untouched
+rather than clearing the list.
 
 Unlike the original plugin (where defining even one profile under its
 `grab { profiles { } }` block replaces *all four* built-in defaults at

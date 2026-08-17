@@ -657,9 +657,48 @@ fn render(frame: &mut Frame, state: &mut State) {
             Constraint::Length(4),
         ])
         .split(area);
-    render_input(frame, chunks[0], state);
+
+    // Grab label gets just the width its own text needs (bordered box,
+    // right-aligned); the query input takes every column left over.
+    let grab_label = grab_label_text(state);
+    let grab_width = grab_label.chars().count() as u16 + 4; // borders(2) + padding(2)
+    let top = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Min(1), Constraint::Length(grab_width)])
+        .split(chunks[0]);
+
+    render_input(frame, top[0], state);
+    render_grab_label(frame, top[1], state, &grab_label);
     render_list(frame, chunks[1], state);
     render_footer_or_banner(frame, chunks[2], state);
+}
+
+/// `grab:<name>` plus the resolved line cap, except for `viewport` -
+/// its capture is the visible screen, not a line count, so a number
+/// there would be misleading. `full` and any custom profile left
+/// unbounded shows `(unbounded)` instead of a number.
+fn grab_label_text(state: &State) -> String {
+    let name = state.grab_cycler.current_name();
+    let profile = state.grab_cycler.current_profile();
+    if profile.source == crate::grab::GrabSource::Viewport {
+        return format!("grab:{name}");
+    }
+    match profile.lines {
+        Some(n) => format!("grab:{name} ({n})"),
+        None => format!("grab:{name} (unbounded)"),
+    }
+}
+
+fn render_grab_label(frame: &mut Frame, area: Rect, state: &State, label: &str) {
+    let p = Paragraph::new(Line::from(Span::styled(
+        label.to_string(),
+        Style::default()
+            .fg(state.theme.accent)
+            .add_modifier(Modifier::BOLD),
+    )))
+    .alignment(ratatui::layout::Alignment::Center)
+    .block(Block::default().borders(Borders::ALL));
+    frame.render_widget(p, area);
 }
 
 fn render_input(frame: &mut Frame, area: Rect, state: &State) {
@@ -721,13 +760,6 @@ fn render_input(frame: &mut Frame, area: Rect, state: &State) {
         Style::default()
             .fg(state.theme.muted)
             .add_modifier(Modifier::DIM),
-    ));
-    spans.push(Span::raw("   "));
-    spans.push(Span::styled(
-        format!("grab:{}", state.grab_cycler.current_name()),
-        Style::default()
-            .fg(state.theme.accent)
-            .add_modifier(Modifier::BOLD),
     ));
     let p = Paragraph::new(Line::from(spans)).block(
         Block::default()
@@ -1053,5 +1085,39 @@ mod color_tests {
     fn color_for_tag_falls_back_to_fallback_type_for_custom_pattern() {
         let theme = Theme::resolve(&crate::config::ColorsConfig::default());
         assert_eq!(theme.color_for_tag("jira"), Color::Gray);
+    }
+}
+
+#[cfg(test)]
+mod grab_label_tests {
+    use super::*;
+
+    fn state_at(initial_grab_name: &str) -> State {
+        let config = crate::config::Config::default();
+        let grab_cycler = crate::grab::GrabCycler::new(
+            &config,
+            &HashSet::new(),
+            None,
+            initial_grab_name,
+            "/tmp/socket".to_string(),
+            "pane1".to_string(),
+            "tab1".to_string(),
+        );
+        State::new(Vec::new(), Vec::new(), false, &config, "", grab_cycler)
+    }
+
+    #[test]
+    fn shows_line_cap_for_quick() {
+        assert_eq!(grab_label_text(&state_at("quick")), "grab:quick (150)");
+    }
+
+    #[test]
+    fn shows_unbounded_for_full() {
+        assert_eq!(grab_label_text(&state_at("full")), "grab:full (unbounded)");
+    }
+
+    #[test]
+    fn omits_line_cap_for_viewport() {
+        assert_eq!(grab_label_text(&state_at("viewport")), "grab:viewport");
     }
 }

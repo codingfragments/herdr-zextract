@@ -149,6 +149,13 @@ impl GrabCycler {
         &self.names[self.current]
     }
 
+    /// The resolved grab profile the cycle currently points at - lets
+    /// the picker's grab-label display show the active line cap
+    /// (`source`/`lines`) alongside the name, without re-resolving it.
+    pub fn current_profile(&self) -> &ResolvedGrabProfile {
+        &self.profiles[self.current]
+    }
+
     /// Capture + extract with the grabber the cycle currently points
     /// at, used for the picker's initial load so `main.rs` doesn't
     /// duplicate the multi-pane/`__pane_id` handling done here.
