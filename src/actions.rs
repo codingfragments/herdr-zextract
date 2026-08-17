@@ -115,7 +115,7 @@ pub fn dispatch(verb: Verb, m: &Match, source_pane_id: &str) -> Outcome {
         return Outcome::Failed(format!(
             "'{}' not available for [{}]",
             verb.label(),
-            m.ty.tag()
+            m.effective_tag()
         ));
     }
     match verb {
@@ -190,7 +190,8 @@ fn run_edit(m: &Match) -> Outcome {
 
 fn match_to_json(m: &Match) -> String {
     let mut fields = m.fields.clone();
-    fields.insert("type".to_string(), m.ty.tag().to_string());
+    fields.remove("__label"); // internal bookkeeping, not a real match field
+    fields.insert("type".to_string(), m.effective_tag().to_string());
     fields.insert("raw".to_string(), m.raw.clone());
     fields.insert("display".to_string(), m.display.clone());
     fields.insert("context".to_string(), m.context.clone());

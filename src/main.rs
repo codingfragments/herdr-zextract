@@ -1,4 +1,5 @@
 mod actions;
+mod config;
 mod matcher;
 mod picker;
 mod socket_client;
@@ -51,13 +52,16 @@ fn run() -> Result<(), String> {
         .and_then(|v| v.as_str())
         .ok_or("pane.read response had no \"read.text\" field")?;
 
-    let matches = matcher::extract(text);
+    let config = config::Config::load();
+    let matches = matcher::extract_with_config(text, &config);
     if matches.is_empty() {
         println!("--- no matches in scrollback of {pane_id} ---");
         return Ok(());
     }
 
-    let selection = picker::run(matches).map_err(|e| format!("picker failed: {e}"))?;
+    let custom_tags: Vec<String> = config.custom.iter().map(|cp| cp.name.clone()).collect();
+    let selection =
+        picker::run(matches, &custom_tags).map_err(|e| format!("picker failed: {e}"))?;
     match selection {
         picker::PickerResult::Selected(m, verb) => match actions::dispatch(verb, &m, &pane_id) {
             actions::Outcome::Done(msg) => println!("{msg}"),
