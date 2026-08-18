@@ -879,6 +879,23 @@ location).
 **Out of scope:** anything not already shipped in v0.1.0 — docs
 describe what exists, not aspirational features.
 
+**Done (verified 2026-08-18):** `README.md`'s planning banner and
+"not yet available" Install section replaced with real, tested
+instructions (`herdr plugin install --ref v0.1.1`/`--ref latest`
+confirmed working live during this session) - see CHANGELOG.md for
+what each release contains instead of duplicating a changelog here.
+`doc/patterns.md`/`doc/types.md`/`doc/use-cases.md` written fresh
+against this port's actual `src/matcher/*.rs`/`src/actions.rs` source
+(not copied from the original verbatim - several real deviations
+surfaced and are called out inline: narrower `url` scheme list, `file`
+defaulting to insert not edit, `ipv6` on by default, a broader
+`secret` format list, and an added `git` type with no original
+equivalent). One gap found and documented rather than silently
+papered over: `Verb::Json`'s output prints to stdout right before the
+popup closes (Phase 9's "close immediately" change), so there's
+currently no way to actually capture it - a candidate follow-up is
+copying it to the clipboard like `copy`/`copy-display` do instead.
+
 **Manual test plan:**
 1. On a machine with no prior state, follow README's install
    instructions verbatim (both Option A and Option B) and confirm each
