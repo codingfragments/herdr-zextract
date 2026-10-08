@@ -2,10 +2,13 @@
 //!
 //! Strategy:
 //!   1. PROMPT-ANCHORED: line starts with a recognized prompt marker
-//!      (`❯ `, `$ `, `> `, `% `, `# `). The command is the rest of the line
-//!      plus any trailing-backslash continuation lines spliced in.
-//!   2. EXEC-ANCHORED (fallback): line contains a known trigger executable
-//!      (`sudo`, `curl`, `wget`, `cat`, `git`, ...). The command runs from
+//!      (default `❯ `, `$ `, `> `, `% `, `# `; extendable via
+//!      `patterns.command.prompt_markers`). The command is the rest of
+//!      the line plus any trailing-backslash continuation lines spliced in.
+//!   2. EXEC-ANCHORED (fallback): line contains a known trigger
+//!      executable (`sudo`, `curl`, `wget`, `cat`, `git`, ...; the list
+//!      is extendable via `patterns.command.triggers` and prunable via
+//!      `patterns.command.triggers_ignore`). The command runs from
 //!      the trigger to end-of-line. No continuation splicing for the exec
 //!      flavor — too risky when embedded in prose.
 //!
@@ -49,11 +52,15 @@ fn looks_like_command(s: &str) -> bool {
     s.trim().len() >= MIN_COMMAND_LEN && s.trim().chars().any(|c| c.is_ascii_alphabetic())
 }
 
-/// Default prompt markers.
-const PROMPT_MARKERS: &[&str] = &["❯ ", "$ ", "> ", "% ", "# "];
+/// Default prompt markers — the built-ins that `patterns.command.
+/// prompt_markers` entries are merged into (never replaced, so a
+/// partial user list can't silently drop `❯ `/`$ ` support).
+pub(crate) const PROMPT_MARKERS: &[&str] = &["❯ ", "$ ", "> ", "% ", "# "];
 
-/// Default trigger list.
-const TRIGGERS: &[&str] = &[
+/// Default trigger list — the built-ins that `patterns.command.triggers`
+/// entries are merged into and `patterns.command.triggers_ignore`
+/// entries are subtracted from.
+pub(crate) const TRIGGERS: &[&str] = &[
     // Install / package managers
     "sudo",
     "apt",
@@ -162,19 +169,27 @@ fn flag_regex() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r"-{1,2}[A-Za-z][A-Za-z0-9-]*").expect("flag regex compiles"))
 }
 
-fn trigger_regex() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        let pattern = format!(
-            r"\b({})\b",
-            TRIGGERS
-                .iter()
-                .map(|t| regex_escape(t))
-                .collect::<Vec<_>>()
-                .join("|")
-        );
-        Regex::new(&pattern).expect("trigger regex compiles")
-    })
+/// Build the exec-anchored trigger alternation regex from an effective
+/// trigger list (built-ins + user `triggers` − user `triggers_ignore`,
+/// as resolved by `config.rs`). Built per `extract` call rather than
+/// cached: the list is user-configurable, and extraction runs once per
+/// grab — one regex compile per popup is well below noise.
+/// `None` when the effective list is empty — an empty alternation
+/// would need a never-matching regex, and `regex-lite` has no
+/// lookaround to spell one; the caller just skips strategy 2.
+fn trigger_regex_for(triggers: &[String]) -> Option<Regex> {
+    if triggers.is_empty() {
+        return None;
+    }
+    let pattern = format!(
+        r"\b({})\b",
+        triggers
+            .iter()
+            .map(|t| regex_escape(t))
+            .collect::<Vec<_>>()
+            .join("|")
+    );
+    Some(Regex::new(&pattern).expect("trigger regex compiles"))
 }
 
 fn continuation_strip_regexes() -> &'static [Regex] {
@@ -197,7 +212,13 @@ fn regex_escape(s: &str) -> String {
         .collect()
 }
 
-pub fn extract(text: &str, flag_anchored: bool) -> Vec<Match> {
+pub fn extract(
+    text: &str,
+    flag_anchored: bool,
+    triggers: &[String],
+    prompt_markers: &[String],
+) -> Vec<Match> {
+    let trigger_re = trigger_regex_for(triggers);
     let lines: Vec<&str> = text.lines().collect();
     let line_offsets: Vec<usize> = compute_line_offsets(&lines);
 
@@ -213,7 +234,7 @@ pub fn extract(text: &str, flag_anchored: bool) -> Vec<Match> {
         }
 
         // 1. PROMPT-ANCHORED.
-        if let Some((prompt_len, cmd_after_prompt)) = match_prompt(line) {
+        if let Some((prompt_len, cmd_after_prompt)) = match_prompt(line, prompt_markers) {
             // Strip inline comment before rprompt-trim so `\ # hint` sequences
             // don't get swallowed by the wide-space trim.
             let (cmd_no_comment, hint) = strip_inline_comment(cmd_after_prompt);
@@ -243,22 +264,26 @@ pub fn extract(text: &str, flag_anchored: bool) -> Vec<Match> {
 
         // 2. EXEC-ANCHORED (fallback). No continuation splice — too risky in prose.
         // Scan only the pre-comment portion so triggers inside `# …` or `// …`
-        // inline comments are not matched.
+        // inline comments are not matched. Skipped entirely when the
+        // effective trigger list is empty (all built-ins ignored, no
+        // user additions).
         let mut matched = false;
-        if let Some(start_col) = match_exec(pre_comment_line(line)) {
-            let (cmd_no_comment, hint) = strip_inline_comment(&line[start_col..]);
-            let raw_cmd = trim_rprompt(cmd_no_comment, RPROMPT_MIN_SPACES).trim_end();
-            if looks_like_command(raw_cmd) {
-                let span_start = line_offsets[i] + start_col;
-                let span_end = span_start + raw_cmd.len();
-                out.push(make_match(
-                    raw_cmd.to_string(),
-                    hint,
-                    line.to_string(),
-                    span_start,
-                    span_end,
-                ));
-                matched = true;
+        if let Some(re) = trigger_re.as_ref() {
+            if let Some(start_col) = match_exec(pre_comment_line(line), re) {
+                let (cmd_no_comment, hint) = strip_inline_comment(&line[start_col..]);
+                let raw_cmd = trim_rprompt(cmd_no_comment, RPROMPT_MIN_SPACES).trim_end();
+                if looks_like_command(raw_cmd) {
+                    let span_start = line_offsets[i] + start_col;
+                    let span_end = span_start + raw_cmd.len();
+                    out.push(make_match(
+                        raw_cmd.to_string(),
+                        hint,
+                        line.to_string(),
+                        span_start,
+                        span_end,
+                    ));
+                    matched = true;
+                }
             }
         }
 
@@ -296,9 +321,9 @@ fn compute_line_offsets(lines: &[&str]) -> Vec<usize> {
 }
 
 /// If `line` begins with a known prompt marker, return (marker_len, rest).
-fn match_prompt(line: &str) -> Option<(usize, &str)> {
-    for marker in PROMPT_MARKERS {
-        if let Some(rest) = line.strip_prefix(marker) {
+fn match_prompt<'a>(line: &'a str, markers: &[String]) -> Option<(usize, &'a str)> {
+    for marker in markers {
+        if let Some(rest) = line.strip_prefix(marker.as_str()) {
             return Some((marker.len(), rest));
         }
     }
@@ -311,8 +336,7 @@ fn match_prompt(line: &str) -> Option<(usize, &str)> {
 /// (the `.` is a non-word char so a word boundary exists), so we
 /// additionally require the byte preceding the trigger to be a real
 /// command-start (whitespace, line start, shell operator, ...).
-fn match_exec(line: &str) -> Option<usize> {
-    let re = trigger_regex();
+fn match_exec(line: &str, re: &Regex) -> Option<usize> {
     for m in re.find_iter(line) {
         let start = m.start();
         let prev = if start == 0 {
@@ -553,23 +577,43 @@ fn make_match(
 mod tests {
     use super::*;
 
+    /// `extract` with the built-in default trigger list and prompt
+    /// markers — the behavior an unconfigured `config.toml` gets.
+    fn extract_default(text: &str, flag_anchored: bool) -> Vec<Match> {
+        let triggers: Vec<String> = TRIGGERS.iter().map(|s| s.to_string()).collect();
+        let markers: Vec<String> = PROMPT_MARKERS.iter().map(|s| s.to_string()).collect();
+        extract(text, flag_anchored, &triggers, &markers)
+    }
+
+    fn triggers_with(extra: &[&str]) -> Vec<String> {
+        TRIGGERS
+            .iter()
+            .map(|s| s.to_string())
+            .chain(extra.iter().map(|s| s.to_string()))
+            .collect()
+    }
+
+    fn default_markers() -> Vec<String> {
+        PROMPT_MARKERS.iter().map(|s| s.to_string()).collect()
+    }
+
     #[test]
     fn prompt_anchored_simple() {
-        let m = extract("$ git log --oneline -n 20", false);
+        let m = extract_default("$ git log --oneline -n 20", false);
         assert_eq!(m.len(), 1);
         assert_eq!(m[0].raw, "git log --oneline -n 20");
     }
 
     #[test]
     fn prompt_anchored_unicode() {
-        let m = extract("❯ cargo build --release", false);
+        let m = extract_default("❯ cargo build --release", false);
         assert_eq!(m.len(), 1);
         assert_eq!(m[0].raw, "cargo build --release");
     }
 
     #[test]
     fn exec_anchored_in_prose() {
-        let m = extract(
+        let m = extract_default(
             "To install run sudo apt install zellij from the README.",
             false,
         );
@@ -579,7 +623,7 @@ mod tests {
 
     #[test]
     fn exec_anchored_pipeline_kept_together() {
-        let m = extract(
+        let m = extract_default(
             "curl -fsSL https://example.com/install.sh | sudo bash",
             false,
         );
@@ -591,7 +635,7 @@ mod tests {
     #[test]
     fn continuation_splicing_basic() {
         let text = "$ curl -fsSL https://example.com/install.sh \\\n    | sudo bash";
-        let m = extract(text, false);
+        let m = extract_default(text, false);
         assert_eq!(m.len(), 1);
         assert_eq!(
             m[0].raw,
@@ -602,7 +646,7 @@ mod tests {
     #[test]
     fn continuation_strips_line_number_prefix() {
         let text = "$ curl -fsSL https://example.com/install.sh \\\n2:  | sudo bash";
-        let m = extract(text, false);
+        let m = extract_default(text, false);
         assert_eq!(m.len(), 1);
         assert_eq!(
             m[0].raw,
@@ -613,7 +657,7 @@ mod tests {
     #[test]
     fn continuation_strips_diff_marker() {
         let text = "$ curl -fsSL https://example.com/install.sh \\\n+   | sudo bash";
-        let m = extract(text, false);
+        let m = extract_default(text, false);
         assert_eq!(
             m[0].raw,
             "curl -fsSL https://example.com/install.sh | sudo bash"
@@ -628,7 +672,7 @@ mod tests {
             text.push_str("\n  hello \\");
         }
         text.push_str("\n  final");
-        let m = extract(&text, false);
+        let m = extract_default(&text, false);
         assert_eq!(m.len(), 1);
         let backslash_count = m[0].raw.matches('\\').count();
         assert!(backslash_count > 0);
@@ -636,39 +680,39 @@ mod tests {
 
     #[test]
     fn prompt_wins_over_exec_on_same_line() {
-        let m = extract("❯ sudo apt install foo", false);
+        let m = extract_default("❯ sudo apt install foo", false);
         assert_eq!(m.len(), 1);
         assert_eq!(m[0].raw, "sudo apt install foo");
     }
 
     #[test]
     fn no_match_in_random_prose() {
-        let m = extract("the quick brown fox jumps over the lazy dog", false);
+        let m = extract_default("the quick brown fox jumps over the lazy dog", false);
         assert!(m.is_empty());
     }
 
     #[test]
     fn rejects_trigger_inside_filename() {
-        let m = extract("Downloaded install.sh from the mirror", false);
+        let m = extract_default("Downloaded install.sh from the mirror", false);
         assert!(m.is_empty(), "false positive: {m:?}");
     }
 
     #[test]
     fn rejects_trigger_inside_path() {
-        let m = extract("path/to/sh detected", false);
+        let m = extract_default("path/to/sh detected", false);
         assert!(m.is_empty(), "false positive: {m:?}");
     }
 
     #[test]
     fn still_triggers_after_space() {
-        let m = extract("Run sh -c 'foo' please", false);
+        let m = extract_default("Run sh -c 'foo' please", false);
         assert_eq!(m.len(), 1);
         assert!(m[0].raw.starts_with("sh"));
     }
 
     #[test]
     fn zellij_exec_anchored_in_output() {
-        let m = extract(
+        let m = extract_default(
             "[dry-run] zellij --session claude-chats --layout cfdefault.kdl",
             false,
         );
@@ -678,7 +722,7 @@ mod tests {
 
     #[test]
     fn tmux_exec_anchored() {
-        let m = extract("running: tmux new-session -s main", false);
+        let m = extract_default("running: tmux new-session -s main", false);
         assert_eq!(m.len(), 1);
         assert!(m[0].raw.starts_with("tmux new-session"));
     }
@@ -688,32 +732,32 @@ mod tests {
         // "jq" isn't in TRIGGERS, so with flag_anchored off neither
         // strategy 1 nor 2 can catch this - exactly the gap strategy 3
         // exists to close.
-        let m = extract("[dry-run] jq -r '.foo' file.json", false);
+        let m = extract_default("[dry-run] jq -r '.foo' file.json", false);
         assert!(m.is_empty());
     }
 
     #[test]
     fn flag_anchored_on_catches_non_trigger_command() {
-        let m = extract("[dry-run] jq -r '.foo' file.json", true);
+        let m = extract_default("[dry-run] jq -r '.foo' file.json", true);
         assert_eq!(m.len(), 1);
         assert!(m[0].raw.starts_with("jq -r"), "got: {:?}", m[0].raw);
     }
 
     #[test]
     fn flag_anchored_rejects_uppercase_start() {
-        let m = extract("The --verbose flag is nice", true);
+        let m = extract_default("The --verbose flag is nice", true);
         assert!(m.is_empty(), "false positive: {m:?}");
     }
 
     #[test]
     fn flag_anchored_rejects_single_char_word() {
-        let m = extract("a --long-flag value", true);
+        let m = extract_default("a --long-flag value", true);
         assert!(m.is_empty(), "false positive: {m:?}");
     }
 
     #[test]
     fn flag_anchored_accepts_two_char_word() {
-        let m = extract("ab --long-flag value", true);
+        let m = extract_default("ab --long-flag value", true);
         assert_eq!(m.len(), 1);
         assert!(m[0].raw.starts_with("ab --long-flag"));
     }
@@ -722,8 +766,72 @@ mod tests {
     fn flag_anchored_yields_to_exec_anchored_on_same_line() {
         // "git" is a trigger, so strategy 2 should win outright -
         // strategy 3 must not also fire and produce a second match.
-        let m = extract("git commit -m 'fix bug'", true);
+        let m = extract_default("git commit -m 'fix bug'", true);
         assert_eq!(m.len(), 1);
         assert!(m[0].raw.starts_with("git commit"));
+    }
+
+    #[test]
+    fn custom_trigger_extends_builtins() {
+        let triggers = triggers_with(&["terraform"]);
+        let m = extract(
+            "[dry-run] terraform apply -auto-approve",
+            false,
+            &triggers,
+            &default_markers(),
+        );
+        assert_eq!(m.len(), 1);
+        assert!(m[0].raw.starts_with("terraform apply"));
+    }
+
+    #[test]
+    fn triggers_ignore_removes_builtin() {
+        // "git" ignored — the same line that `exec_anchored` style tests
+        // match via a prompt marker here must NOT match via strategy 2
+        // on an unprompted line.
+        let triggers: Vec<String> = TRIGGERS
+            .iter()
+            .filter(|t| **t != "git")
+            .map(|s| s.to_string())
+            .collect();
+        assert!(extract(
+            "running: git commit -m 'fix bug'",
+            false,
+            &triggers,
+            &default_markers()
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn all_triggers_ignored_disables_exec_anchored() {
+        let triggers: Vec<String> = Vec::new();
+        assert!(extract(
+            "running: tmux new-session -s main",
+            false,
+            &triggers,
+            &default_markers()
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn custom_prompt_marker_extends_builtins() {
+        let mut markers = default_markers();
+        markers.push("» ".to_string());
+        let m = extract("» nvim config.toml", false, &triggers_with(&[]), &markers);
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0].raw, "nvim config.toml");
+    }
+
+    #[test]
+    fn prompt_markers_never_replaced_by_partial_list() {
+        // Even a marker list containing only the custom entry keeps the
+        // built-ins working in production (config.rs merges; here the
+        // merge is simulated by the caller passing both).
+        let markers: Vec<String> = vec!["❯ ".to_string(), "» ".to_string()];
+        let m = extract("❯ cargo build", false, &triggers_with(&[]), &markers);
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0].raw, "cargo build");
     }
 }

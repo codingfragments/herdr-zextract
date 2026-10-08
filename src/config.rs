@@ -27,6 +27,61 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
+use crate::matcher::command::{PROMPT_MARKERS, TRIGGERS};
+
+/// The built-in trigger list, as owned strings (the base that
+/// `[patterns.command].triggers` merges into).
+fn builtin_triggers() -> Vec<String> {
+    TRIGGERS.iter().map(|s| s.to_string()).collect()
+}
+
+/// The built-in prompt-marker list, as owned strings (the base that
+/// `[patterns.command].prompt_markers` merges into).
+fn builtin_prompt_markers() -> Vec<String> {
+    PROMPT_MARKERS.iter().map(|s| s.to_string()).collect()
+}
+
+/// Effective trigger list: `(built-ins ∪ extra) − ignore`, order-
+/// preserving, deduplicated, empty/whitespace-only entries dropped.
+/// `ignore` wins over `extra` so a user can prune both built-ins and
+/// their own additions with one key.
+fn resolve_triggers(extra: &[String], ignore: &[String]) -> Vec<String> {
+    let ignored: HashSet<String> = ignore
+        .iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let mut out: Vec<String> = Vec::new();
+    for t in TRIGGERS.iter().map(|s| s.to_string()).chain(
+        extra
+            .iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty()),
+    ) {
+        if !ignored.contains(&t) && !out.contains(&t) {
+            out.push(t);
+        }
+    }
+    out
+}
+
+/// Effective prompt-marker list: built-ins + `extra`, order-preserving,
+/// deduplicated, empty entries dropped. Entries are kept verbatim —
+/// the trailing space of `"❯ "` is part of the marker, so no trimming.
+fn resolve_prompt_markers(extra: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for m in PROMPT_MARKERS
+        .iter()
+        .map(|s| s.to_string())
+        .chain(extra.iter().filter(|s| !s.is_empty()).cloned())
+    {
+        if !out.contains(&m) {
+            out.push(m);
+        }
+    }
+    out
+}
+
 /// Starter config written by [`write_default`], mirroring the
 /// original plugin's `Ctrl-W` "write starter config" banner action.
 /// Sourced directly from `config.example.toml` at the repo root (the
@@ -87,6 +142,25 @@ struct CommandSection {
     /// produce false positives on prose containing flag-looking tokens.
     #[serde(default)]
     flag_anchored: bool,
+
+    /// Extra trigger executables for the exec-anchored (strategy 2)
+    /// detection, merged into the built-in list - never replacing it,
+    /// so a partial list keeps `git`/`cargo`/`curl`/... working.
+    /// Duplicates of built-ins are harmless (deduped on merge).
+    #[serde(default)]
+    triggers: Vec<String>,
+
+    /// Built-in trigger executables to *remove* from the exec-anchored
+    /// list - for pruning a trigger that false-positives on your
+    /// scrollback (e.g. `go` matching the English word "go").
+    #[serde(default)]
+    triggers_ignore: Vec<String>,
+
+    /// Extra prompt markers for the prompt-anchored (strategy 1)
+    /// detection, merged into the built-in `❯ `/`$ `/`> `/`% `/`# `
+    /// list - never replacing it.
+    #[serde(default)]
+    prompt_markers: Vec<String>,
 }
 
 /// Verbosity of `herdr-zextract`'s stderr diagnostics, ported from the
@@ -338,6 +412,13 @@ pub struct Config {
     pub secret_entropy_filter: bool,
     /// Whether `cmd`'s flag-anchored (opt-in) detection strategy runs.
     pub command_flag_anchored: bool,
+    /// Effective trigger-executable list for `cmd`'s exec-anchored
+    /// detection: built-ins + `[patterns.command].triggers` −
+    /// `[patterns.command].triggers_ignore`.
+    pub command_triggers: Vec<String>,
+    /// Effective prompt-marker list for `cmd`'s prompt-anchored
+    /// detection: built-ins + `[patterns.command].prompt_markers`.
+    pub command_prompt_markers: Vec<String>,
     pub custom: Vec<CustomPattern>,
     pub profiles: std::collections::HashMap<String, Profile>,
     pub grab_profiles: std::collections::HashMap<String, GrabProfileOverride>,
@@ -355,6 +436,8 @@ impl Default for Config {
             disabled: HashSet::new(),
             secret_entropy_filter: true,
             command_flag_anchored: false,
+            command_triggers: builtin_triggers(),
+            command_prompt_markers: builtin_prompt_markers(),
             custom: Vec::new(),
             profiles: std::collections::HashMap::new(),
             grab_profiles: std::collections::HashMap::new(),
@@ -516,6 +599,13 @@ impl Config {
                 disabled: raw.patterns.disable.into_iter().collect(),
                 secret_entropy_filter: raw.patterns.secret.entropy_filter,
                 command_flag_anchored: raw.patterns.command.flag_anchored,
+                command_triggers: resolve_triggers(
+                    &raw.patterns.command.triggers,
+                    &raw.patterns.command.triggers_ignore,
+                ),
+                command_prompt_markers: resolve_prompt_markers(
+                    &raw.patterns.command.prompt_markers,
+                ),
                 custom: raw.patterns.custom,
                 profiles: raw.profiles,
                 grab_profiles: raw.grab_profiles,
@@ -572,6 +662,36 @@ pub fn write_default() -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn command_section_triggers_merge_ignore_and_markers_parse() {
+        let raw: RawConfig = toml::from_str(
+            r#"
+[patterns.command]
+flag_anchored = true
+triggers = ["terraform", "ansible", "git"]
+triggers_ignore = ["go", "terraform"]
+prompt_markers = ["» ", "λ "]
+"#,
+        )
+        .expect("parses");
+        let triggers = resolve_triggers(
+            &raw.patterns.command.triggers,
+            &raw.patterns.command.triggers_ignore,
+        );
+        // merge: ansible added, git deduped (already built-in)
+        assert!(triggers.contains(&"ansible".to_string()));
+        assert_eq!(triggers.iter().filter(|t| t.as_str() == "git").count(), 1);
+        // ignore wins over merge ("terraform" is in both lists)
+        assert!(!triggers.contains(&"terraform".to_string()));
+        assert!(!triggers.contains(&"go".to_string()));
+        // markers: merge, verbatim (trailing space preserved)
+        let markers = resolve_prompt_markers(&raw.patterns.command.prompt_markers);
+        assert!(markers.contains(&"» ".to_string()));
+        assert!(markers.contains(&"λ ".to_string()));
+        assert!(markers.contains(&"❯ ".to_string()));
+        assert_eq!(markers.iter().filter(|m| m.as_str() == "$ ").count(), 1);
+    }
 
     #[test]
     fn shipped_example_config_parses() {

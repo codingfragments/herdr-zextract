@@ -28,7 +28,11 @@ instead, matching Herdr's own config conventions (`config.toml`,
 8 — `log_level`, `[grab_profiles.<name>]`, `patterns.command.flag_anchored`,
 `[ui]`/`[profiles.<name>].preview`, `[colors]`, and `[types]`/
 `[actions]`/`[limits]` all reached 100% parity with the original's
-`zextract.kdl` surface in that phase. Preview pane *rendering* itself
+`zextract.kdl` surface in that phase. On top of the original's surface,
+`[patterns.command]` also accepts `triggers`/`triggers_ignore`/
+`prompt_markers` for runtime tuning of the `cmd` detection lists — see
+[`[patterns.command]`](#patternscommand--cmd-detection-tuning) below.
+Preview pane *rendering* itself
 is still Phase 9 — `[ui].preview` is parsed and resolved but has
 nothing to render against yet.
 
@@ -123,11 +127,14 @@ fallback that catches unknown high-entropy tokens. Set `entropy_filter
 
 ---
 
-## `[patterns.command]` — flag-anchored detection toggle
+## `[patterns.command]` — cmd detection tuning
 
 ```toml
 [patterns.command]
-flag_anchored = false   # default
+flag_anchored = false                  # default
+triggers = ["terraform", "ansible"]  # merged into built-ins
+triggers_ignore = ["go", "more"]      # removed from built-ins
+prompt_markers = ["» ", "λ "]         # merged into built-ins
 ```
 
 `cmd` detection runs two strategies always (prompt-anchored, then
@@ -144,6 +151,38 @@ single-letter noise. Off by default because it can still false-positive
 on ordinary prose containing flag-looking tokens (e.g. `"missing
 argument -v"`); use `#cmd`/`#!cmd` query filters to show or hide command
 matches in a session where the noise is too high.
+
+### `triggers` / `triggers_ignore` — exec-anchored trigger list
+
+The exec-anchored strategy (2) matches lines containing a known trigger
+executable (`sudo`, `git`, `curl`, ... — the full built-in list is the
+`TRIGGERS` const in `src/matcher/command.rs`). Both keys adjust that
+list at runtime, no rebuild needed:
+
+- `triggers` — extra executables **merged** into the built-ins, never
+  replacing them, so a partial list keeps `git`/`cargo`/`curl`/...
+  working. Duplicates of built-ins are deduped. Use it for your own
+  tools that aren't built in (`terraform`, `ansible`, `nixos-rebuild`).
+- `triggers_ignore` — words **removed** from the effective list, for
+  pruning a built-in that false-positives on your scrollback (e.g. `go`
+  matching the English word "go", or `more` in prose). `triggers_ignore`
+  wins if the same word appears in both keys. Ignoring every built-in
+  and adding none disables strategy 2 entirely (prompt-anchored and
+  flag-anchored still run).
+
+Empty or whitespace-only entries are skipped. Trigger matching keeps
+all the built-in command-start guards — only the word list changes,
+not where a trigger is allowed to fire from (preceded by line start,
+whitespace, or a shell operator; never `.`/`/`, so `install.sh` and
+`/usr/bin/sh` stay inert).
+
+### `prompt_markers` — prompt-anchored marker list
+
+Extra prompt markers **merged** into the built-ins (`❯ `, `$ `, `> `,
+`% `, `# `), never replacing them — for custom shell prompts whose
+marker isn't shaped like the defaults. Entries are matched verbatim as
+line prefixes, trailing space included (write `"» "`, not `"»"`).
+Empty entries are skipped.
 
 ---
 
