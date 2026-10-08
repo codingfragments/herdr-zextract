@@ -44,6 +44,21 @@ entropy_filter = true
 # prose containing flag-looking tokens.
 flag_anchored = false
 
+# Extra trigger executables for exec-anchored detection, MERGED into
+# the built-in list (~90 entries: sudo, git, curl, cargo, ...) - never
+# replacing it. Add your own tools that aren't built in:
+# triggers = ["terraform", "ansible", "nixos-rebuild"]
+
+# Built-in triggers to REMOVE, for words that false-positive on your
+# scrollback (e.g. `go` matching English "go" in prose). Wins over
+# `triggers` if the same word appears in both.
+# triggers_ignore = ["go", "more"]
+
+# Extra prompt markers for prompt-anchored detection, MERGED into the
+# built-ins ("❯ ", "$ ", "> ", "% ", "# ") - for custom shell
+# prompts. Entries are matched verbatim, trailing space included:
+# prompt_markers = ["» ", "λ "]
+
 # Custom regex patterns. Each gets its own #name filter tag in the
 # picker. Uncomment and adjust, or add your own [[patterns.custom]]
 # blocks below.
@@ -88,6 +103,11 @@ flag_anchored = false
 #   [profiles.url]
 #   patterns = ["url", "ipv4", "ipv6"]
 #   preview = "off"
+#
+# `type_filter` pre-fills the picker's query with #tag filters - narrows
+# what's SHOWN (unlike `patterns`, which restricts what's extracted):
+#   [profiles.custom1]
+#   type_filter = ["cmd", "file"]
 #
 # Ten free slots (custom0..custom9) with no built-in default - bind a
 # key to the matching zextract-customN action in herdr-plugin.toml,

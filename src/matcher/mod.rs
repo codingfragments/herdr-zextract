@@ -204,7 +204,12 @@ pub fn extract_with_config(text: &str, config: &crate::config::Config) -> Vec<Ma
         all.extend(quoted::extract(text));
     }
     if !dis.contains("cmd") {
-        all.extend(command::extract(text, config.command_flag_anchored));
+        all.extend(command::extract(
+            text,
+            config.command_flag_anchored,
+            &config.command_triggers,
+            &config.command_prompt_markers,
+        ));
     }
     if !dis.contains("secret") {
         all.extend(secret::extract(text, config.secret_entropy_filter));
@@ -278,6 +283,43 @@ mod fixture_tests {
 
     fn count_by_type(text: &str, ty: MatchType) -> usize {
         extract(text).into_iter().filter(|m| m.ty == ty).count()
+    }
+
+    #[test]
+    fn custom_command_config_flows_through_extract_with_config() {
+        // Wiring test: a Config carrying user trigger/prompt-marker
+        // lists must reach command::extract via extract_with_config -
+        // guarding the plumbing, not the detection logic itself.
+        let mut config = crate::config::Config::default();
+        config.command_triggers.push("terraform".to_string());
+        config.command_triggers.retain(|t| t != "git");
+        config.command_prompt_markers.push("» ".to_string());
+
+        // Custom trigger fires (terraform), built-ins survive (cargo),
+        // ignored one doesn't (git), custom prompt marker works (»).
+        let m = extract_with_config("[dry-run] terraform apply -auto-approve", &config);
+        assert_eq!(m.iter().filter(|m| m.ty == MatchType::Command).count(), 1);
+        assert_eq!(
+            extract_with_config("running: git commit -m x", &config)
+                .iter()
+                .filter(|m| m.ty == MatchType::Command)
+                .count(),
+            0
+        );
+        assert_eq!(
+            extract_with_config("❯ cargo build", &config)
+                .iter()
+                .filter(|m| m.ty == MatchType::Command)
+                .count(),
+            1
+        );
+        assert_eq!(
+            extract_with_config("» nvim config.toml", &config)
+                .iter()
+                .filter(|m| m.ty == MatchType::Command)
+                .count(),
+            1
+        );
     }
 
     #[test]
