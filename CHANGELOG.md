@@ -5,6 +5,27 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-10-08
+
+### Added
+
+- `[patterns.command]` gains three keys for tuning `cmd` detection at
+  runtime, no rebuild needed:
+  - `triggers` — extra exec-anchored trigger executables, merged into
+    the built-in list (never replacing it, so a partial list keeps
+    `git`/`cargo`/`curl`/... working). For tools that aren't built in
+    (e.g. `pi`, `terraform`).
+  - `triggers_ignore` — words removed from the effective trigger list,
+    for pruning a built-in that false-positives on scrollback (e.g. `go`
+    matching the English word "go"). Wins over `triggers` on overlap;
+    emptying the whole list disables exec-anchored detection entirely.
+  - `prompt_markers` — extra prompt-anchored markers, merged into the
+    built-ins and matched verbatim including trailing space, for
+    custom shell prompts.
+- `config.example.toml`: placeholder for `[profiles.<name>].type_filter`
+  (query pre-fill) — previously the one documented key missing from
+  the starter template.
+
 ## [0.1.1] - 2026-08-18
 
 ### Changed
