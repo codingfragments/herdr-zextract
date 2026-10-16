@@ -64,7 +64,8 @@ in the same file that failed to parse.
 preview = "off"                # default
 preview_open_width = "40%"     # default
 preview_closed_width = "70%"   # default
-freshness = "both"            # default
+freshness_row = "auto"         # default
+freshness_preview = "auto"     # default
 ```
 
 | Key | Description |
@@ -72,7 +73,8 @@ freshness = "both"            # default
 | `preview` | Preview pane state at launch. `"off"` = closed (default), `"auto"` = closed (see note below), `"always"` = open. Overridden per keybind by `[profiles.<name>].preview` when set. |
 | `preview_open_width` | The list column's width while the preview is open - a percent string (`"40%"`) or a bare cell count (`"120"`). The preview column takes whatever's left (60% by default). |
 | `preview_closed_width` | Has no effect (see note below). |
-| `freshness` | Where the match-position signal is shown: `"both"` (default) = a dim `↑N` column at the end of each row (while the preview split is closed) plus the preview border title `preview · L1204/1309 · 105↑`; `"preview"` or `"row"` = one of the two; `"off"` = neither. `N` = lines above the bottom of the match's pane buffer (`↑0` = newest line) — scrollback has no timestamps, so line distance is the only truthful freshness signal. The list is *always* freshness-tie-broken regardless (see the freshness note below). |
+| `freshness_row` | Tri-state for the dim `↑N` column at the end of each row (`N` = lines above the bottom of the match's pane buffer; `↑0` = newest line). `"auto"` (default) = show only while the preview split is closed; `"on"` = always (e.g. to compare distances across rows with the preview open); `"off"` = never. |
+| `freshness_preview` | Tri-state for the preview border title `preview · L1204/1309 · 105↑`. `"auto"` (default) = show while the preview split is open; `"on"` = same as auto here; `"off"` = plain `preview` title. |
 
 **Note on freshness sorting:** with equal fuzzy scores the list orders
 freshest-first. With an empty query every score is 0, so the plain
@@ -80,12 +82,16 @@ opened list is fully freshness-ordered; with a typed query relevance
 still leads and freshness only breaks ties — which is exactly what
 separates near-identical matches (same command or URL, only a token
 differing) that score identically. Matches whose pane text is
-unavailable (stale after a regrab) show `↑?` and sort last.
+unavailable (stale after a regrab) show `↑?` and sort last. The sort
+tie-break is not configurable — it is the feature.
 
-**Note on the row column:** it renders only while the preview split
-is *closed* — once the preview is open (`p`/`Ctrl-P`), its border
-title carries the position and the row column drops out to keep
-rows quiet.
+**Note on the two tri-states:** both keys default to `auto`, which
+means exactly one surface at a time — the row column while the
+preview is closed, the border title while it's open. Set
+`freshness_row = "on"` to have both at once (the title shows only the
+highlighted row's position; the column shows every row's, which is
+what comparative scanning wants). The single `freshness = "both"`
+key from 0.4.0–0.4.1 was replaced by these two keys.
 
 **Note on `"auto"`:** the original remembers the previous session's
 open/closed state across launches. This port has no such persistence —

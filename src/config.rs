@@ -281,23 +281,19 @@ pub enum PreviewState {
     Always,
 }
 
-/// `[ui].freshness` - where the match-position signal (lines above the
-/// pane-buffer bottom, e.g. `↑105` / `preview · L1204/1309 · 105↑`)
-/// is shown. The filtered list is *always* freshness-tie-broken
-/// (equal fuzzy scores order freshest-first; an empty query scores
-/// everything 0, so the plain list is fully freshness-ordered) -
-/// this key only controls the two *displays*.
+/// `[ui].freshness_row` / `[ui].freshness_preview` — tri-state
+/// visibility for the two freshness surfaces (the `↑N` row column and
+/// the preview border title; see `picker::freshness`). `auto` =
+/// exactly one surface at a time (the row column only while the
+/// preview split is closed, the title only while it's open); `on` =
+/// always, even alongside the other surface; `off` = never. The
+/// freshness *sort tie-break* is not configurable — it is the feature.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
-pub enum FreshnessDisplay {
-    /// Row column `↑N` plus the preview title (default).
+pub enum FreshnessSurface {
     #[default]
-    Both,
-    /// Preview title only - rows stay as they were.
-    Preview,
-    /// Row column only.
-    Row,
-    /// Neither display; the sort tie-break still applies.
+    Auto,
+    On,
     Off,
 }
 
@@ -312,9 +308,13 @@ pub struct UiConfig {
     #[serde(default = "default_preview_closed_width")]
     pub preview_closed_width: String,
     /// Where the freshness/position signal is shown - see
-    /// [`FreshnessDisplay`]. Sort tie-break always applies.
+    /// [`FreshnessSurface`]. Sort tie-break always applies.
     #[serde(default)]
-    pub freshness: FreshnessDisplay,
+    pub freshness_row: FreshnessSurface,
+    /// Preview-title visibility for the position signal - see
+    /// [`FreshnessSurface`].
+    #[serde(default)]
+    pub freshness_preview: FreshnessSurface,
 }
 
 impl Default for UiConfig {
@@ -323,7 +323,8 @@ impl Default for UiConfig {
             preview: PreviewState::default(),
             preview_open_width: default_preview_open_width(),
             preview_closed_width: default_preview_closed_width(),
-            freshness: FreshnessDisplay::default(),
+            freshness_row: FreshnessSurface::default(),
+            freshness_preview: FreshnessSurface::default(),
         }
     }
 }
@@ -979,6 +980,34 @@ prompt_markers = ["» ", "λ "]
     fn resolve_preview_open_defaults_closed() {
         let config = Config::default();
         assert!(!config.resolve_preview_open(&Profile::default()));
+    }
+
+    #[test]
+    fn ui_freshness_keys_parse_and_default() {
+        // `UiConfig` is the [ui] sub-table of the document, so parse
+        // through a wrapper — deserializing the document itself would
+        // silently drop every key inside [ui].
+        #[derive(serde::Deserialize)]
+        struct Doc {
+            ui: UiConfig,
+        }
+        let parse = |s: &str| toml::from_str::<Doc>(s).unwrap().ui;
+
+        // Absent → Auto on both surfaces (the 0.4.x default behavior).
+        let ui = parse("[ui]");
+        assert_eq!(ui.freshness_row, FreshnessSurface::Auto);
+        assert_eq!(ui.freshness_preview, FreshnessSurface::Auto);
+
+        // Explicit values parse.
+        let ui = parse("[ui]\nfreshness_row = \"on\"\nfreshness_preview = \"off\"");
+        assert_eq!(ui.freshness_row, FreshnessSurface::On);
+        assert_eq!(ui.freshness_preview, FreshnessSurface::Off);
+
+        // The 0.4.0–0.4.1 single `freshness` key is gone: serde
+        // ignores unknown keys, so it must not influence anything.
+        let ui = parse("[ui]\nfreshness = \"both\"");
+        assert_eq!(ui.freshness_row, FreshnessSurface::Auto);
+        assert_eq!(ui.freshness_preview, FreshnessSurface::Auto);
     }
 
     #[test]
