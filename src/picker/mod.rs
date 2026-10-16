@@ -1036,16 +1036,20 @@ fn render_list(frame: &mut Frame, area: Rect, state: &mut State) {
                 format!("[{}]  ", m.effective_tag()),
                 Style::default().fg(state.theme.color_for_type(m.ty)),
             );
-            // Freshness column (dim, after the tag pill): lines above
-            // the pane-buffer bottom - `↑0` is the newest line. See
-            // `[ui].freshness` in doc/config-reference.md.
-            let fresh_span = if matches!(
-                state.config.ui.freshness,
-                crate::config::FreshnessDisplay::Row | crate::config::FreshnessDisplay::Both
-            ) {
+            // Freshness column (dim, at the END of the row, and only
+            // while the preview split is closed — with the preview open
+            // its border title already carries the position, so a
+            // second column after the tag was pure noise). The label
+            // reserves its width from the display so truncation
+            // leaves room for it. See `[ui].freshness`.
+            let fresh_span = if !state.preview_open
+                && matches!(
+                    state.config.ui.freshness,
+                    crate::config::FreshnessDisplay::Row | crate::config::FreshnessDisplay::Both
+                ) {
                 let label = freshness::row_label(state.line_distance_from_bottom(m));
                 Some(Span::styled(
-                    format!("{label}  "),
+                    format!("  {label}"),
                     Style::default()
                         .fg(state.theme.muted)
                         .add_modifier(Modifier::DIM),
@@ -1053,11 +1057,11 @@ fn render_list(frame: &mut Frame, area: Rect, state: &mut State) {
             } else {
                 None
             };
-            let mut tag_overhead = m.effective_tag().chars().count() + 8 + pane_overhead; // gutter(2) + "[tag]  "
+            let tag_overhead = m.effective_tag().chars().count() + 8 + pane_overhead; // gutter(2) + "[tag]  "
+            let mut avail = (area.width as usize).saturating_sub(tag_overhead);
             if let Some(fs) = &fresh_span {
-                tag_overhead += fs.content.chars().count();
+                avail = avail.saturating_sub(fs.content.chars().count());
             }
-            let avail = (area.width as usize).saturating_sub(tag_overhead);
             let use_middle = matches!(
                 m.ty,
                 MatchType::Url | MatchType::File | MatchType::Diagnostic | MatchType::Git
@@ -1068,10 +1072,10 @@ fn render_list(frame: &mut Frame, area: Rect, state: &mut State) {
                 spans.push(ps);
             }
             spans.push(tag_span);
+            spans.extend(highlight_spans(&display, &s.indices, state.theme.highlight));
             if let Some(fs) = fresh_span {
                 spans.push(fs);
             }
-            spans.extend(highlight_spans(&display, &s.indices, state.theme.highlight));
             ListItem::new(Line::from(spans))
         })
         .collect();
