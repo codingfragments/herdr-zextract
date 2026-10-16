@@ -822,11 +822,10 @@ fn render_preview(frame: &mut Frame, area: Rect, state: &State) {
     };
     // Position in the border title — `preview · L1204/1309 · 105↑` —
     // the spot-check for telling near-identical rows apart (same
-    // link/command, different token). See `[ui].freshness`.
-    let block = if matches!(
-        state.config.ui.freshness,
-        crate::config::FreshnessDisplay::Preview | crate::config::FreshnessDisplay::Both
-    ) {
+    // link/command, different token). Tri-stated by
+    // `[ui].freshness_preview`; `render_preview` only runs with the
+    // split open, so Auto and On both show here.
+    let block = if freshness::surface_visible(state.config.ui.freshness_preview, true, true) {
         Block::default()
             .borders(Borders::ALL)
             .title(freshness::preview_title(ctx.position))
@@ -1036,17 +1035,17 @@ fn render_list(frame: &mut Frame, area: Rect, state: &mut State) {
                 format!("[{}]  ", m.effective_tag()),
                 Style::default().fg(state.theme.color_for_type(m.ty)),
             );
-            // Freshness column (dim, at the END of the row, and only
-            // while the preview split is closed — with the preview open
-            // its border title already carries the position, so a
-            // second column after the tag was pure noise). The label
-            // reserves its width from the display so truncation
-            // leaves room for it. See `[ui].freshness`.
-            let fresh_span = if !state.preview_open
-                && matches!(
-                    state.config.ui.freshness,
-                    crate::config::FreshnessDisplay::Row | crate::config::FreshnessDisplay::Both
-                ) {
+            // Freshness column (dim, at the END of the row). Tri-stated
+            // by `[ui].freshness_row`: Auto shows it only while the
+            // preview split is closed (its border title carries the
+            // position when open — exactly one surface at a time), On
+            // always, Off never. The label reserves its width from
+            // the display so truncation leaves room for it.
+            let fresh_span = if freshness::surface_visible(
+                state.config.ui.freshness_row,
+                state.preview_open,
+                false,
+            ) {
                 let label = freshness::row_label(state.line_distance_from_bottom(m));
                 Some(Span::styled(
                     format!("  {label}"),

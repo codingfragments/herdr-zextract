@@ -36,7 +36,9 @@ fuzzy scores the list orders freshest-first (an empty query means
 fully freshness-ordered), and the preview title shows the exact
 position (`preview · L1204/1309 · 105↑`) — what tells two
 near-identical URLs or commands apart when only a token differs.
-Toggle the displays via `[ui].freshness`.
+Toggle the surfaces via `[ui].freshness_row` /
+`[ui].freshness_preview` (each `auto`/`on`/`off`; defaults `auto` —
+exactly one surface at a time).
 
 Fills the same gap tmux users cover with `extrakto` / `fingers` /
 `fzf-links`.

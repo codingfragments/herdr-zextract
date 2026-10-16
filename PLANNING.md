@@ -940,10 +940,15 @@ replaced) with `distance_from_bottom` (0 = newest line). The list's
 asc)`: fuzzy relevance stays primary, freshness breaks ties — and
 with an empty query every score is 0, so the plain list is fully
 freshness-ordered. Stale pane ids sort last (`↑?`). Displays,
-configurable via `[ui].freshness = both|preview|row|off` (default
-`both`): a dim `↑N` column after the `[tag]` pill on each row, and
-the preview border title `preview · L1204/1309 · 105↑`. The tie-break
-sort itself is not configurable — it *is* the feature.
+tri-stated per surface via `[ui].freshness_row` /
+`[ui].freshness_preview` (each `auto`/`on`/`off`, default `auto`):
+`auto` = a dim `↑N` column at the row end while the preview split
+is closed, and the preview border title
+`preview · L1204/1309 · 105↑` while it's open (exactly one surface
+at a time; the 0.4.1 bugfix moved the column to row end and
+coupled the surfaces — the 0.5.0 tri-state rework on
+`feature/freshness-config` made the coupling configurable). The
+tie-break sort itself is not configurable — it *is* the feature.
 
 **Recorded follow-ups:** a "diff against the next-newest occurrence"
 preview highlight (the user's real differentiator is often *where*

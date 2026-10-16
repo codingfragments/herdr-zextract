@@ -25,17 +25,21 @@
 # see doc/config-reference.md.
 # preview_open_width = "40%"
 #
-# Where the match-position/freshness signal is shown. One of:
-#   both    dim ↑N column at the END of each list row (only while the
-#           preview split is closed) + preview border title
-#           "preview · L1204/1309 · 105↑" (N = lines above the pane
-#           buffer's bottom; ↑0 = newest line)
-#   preview preview border title only
-#   row     list row column only (also only while preview is closed)
-#   off     neither display
-# The list is always freshness-tie-broken regardless (equal fuzzy
-# scores order freshest-first; empty query = fully freshness-ordered).
-# freshness = "both"
+# Tri-state visibility for the freshness/position signal's two
+# surfaces. Each: auto | on | off.
+#   freshness_row: the dim ↑N column at the END of each list row
+#     (N = lines above the pane buffer's bottom; ↑0 = newest line).
+#     auto (default) = only while the preview split is closed;
+#     on = always (comparative scanning with the preview open);
+#     off = never.
+#   freshness_preview: the preview border title
+#     "preview · L1204/1309 · 105↑". auto (default) = while the
+#     preview split is open; off = plain "preview" title.
+# With both on auto, exactly one surface shows at a time. The list
+# is always freshness-tie-broken regardless (equal fuzzy scores
+# order freshest-first; empty query = fully freshness-ordered).
+# freshness_row = "auto"
+# freshness_preview = "auto"
 # preview_closed_width = "70%"
 
 [patterns]

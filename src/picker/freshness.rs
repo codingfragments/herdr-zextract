@@ -56,6 +56,29 @@ pub fn distance_from_bottom(p: &PanePositions, span_start: usize) -> usize {
         .saturating_sub(p.line_of(span_start))
 }
 
+/// Effective visibility of one freshness surface under its tri-state
+/// (`[ui].freshness_row` / `[ui].freshness_preview`). `Auto` shows the
+/// surface exactly when the *other* one isn't showing: the row column
+/// while the preview split is closed, the preview title while it's
+/// open — exactly one surface at a time. `On` always shows (both
+/// surfaces at once, e.g. for comparing distances across rows with
+/// the preview open), `Off` never does.
+///
+/// `auto_shows_when_open`: `false` for the row column (shows while
+/// the preview is closed), `true` for the preview title.
+pub fn surface_visible(
+    state: crate::config::FreshnessSurface,
+    preview_open: bool,
+    auto_shows_when_open: bool,
+) -> bool {
+    use crate::config::FreshnessSurface::*;
+    match state {
+        On => true,
+        Off => false,
+        Auto => preview_open == auto_shows_when_open,
+    }
+}
+
 /// Sort key for a match whose pane table is unavailable (stale
 /// `__pane_id` after a regrab): sorts after every known position.
 pub const UNKNOWN: usize = usize::MAX;
@@ -163,5 +186,23 @@ mod tests {
         assert_eq!(preview_title(Some((0, 1))), "preview · L1/1 · 0↑");
         assert_eq!(preview_title(None), "preview");
         assert_eq!(preview_title(Some((0, 0))), "preview");
+    }
+
+    #[test]
+    fn surface_visible_truth_table() {
+        use crate::config::FreshnessSurface as S;
+        // Row column: Auto shows only while the preview is closed.
+        assert!(!surface_visible(S::Auto, true, false));
+        assert!(surface_visible(S::Auto, false, false));
+        // Preview title: Auto shows only while the preview is open.
+        assert!(surface_visible(S::Auto, true, true));
+        assert!(!surface_visible(S::Auto, false, true));
+        // On/Off ignore the preview state entirely.
+        for open in [true, false] {
+            assert!(surface_visible(S::On, open, true));
+            assert!(surface_visible(S::On, open, false));
+            assert!(!surface_visible(S::Off, open, true));
+            assert!(!surface_visible(S::Off, open, false));
+        }
     }
 }
