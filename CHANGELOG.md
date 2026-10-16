@@ -5,6 +5,25 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-10-16
+
+### Added
+
+- Freshness: every match now carries its position signal — how far
+  above the bottom of its pane's scroll buffer it sits (`↑105`,
+  `↑0` = newest line). With equal fuzzy scores the list orders
+  freshest-first; with an empty query every score is 0, so the plain
+  opened list is fully freshness-ordered. This is what tells
+  near-identical matches apart — the same command or URL printed
+  repeatedly, differing only in a token.
+  - `[ui].freshness = "both" | "preview" | "row" | "off"` (default
+    `both`) controls the two displays: a dim `↑N` column after the
+    `[tag]` pill on each list row, and the preview border title
+    `preview · L1204/1309 · 105↑` (exact buffer line + distance from
+    the bottom; blocks report their first content line)
+  - the tie-break sort itself always applies; stale matches whose
+    pane text is gone show `↑?` and sort last
+
 ## [0.3.0] - 2026-10-16
 
 ### Added
