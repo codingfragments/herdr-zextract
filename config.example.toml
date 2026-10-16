@@ -157,7 +157,7 @@ flag_anchored = false
 #   error         — rejection/failure status messages
 #   fallback_type — color for a custom pattern with no dedicated type_* slot
 #   type_url type_file type_diag type_git type_sha type_ipv4 type_ipv6
-#   type_uuid type_quoted type_command type_secret — per-#tag colors
+#   type_uuid type_quoted type_command type_secret type_block — per-#tag colors
 #
 # Catppuccin Mocha (dark)
 # [colors]
@@ -179,6 +179,7 @@ flag_anchored = false
 # type_quoted    = "#a6adc8"
 # type_command   = "#f5c2e7"
 # type_secret    = "#eba0ac"
+# type_block     = "#89b4fa"
 #
 # Catppuccin Macchiato (dark)
 # [colors]
