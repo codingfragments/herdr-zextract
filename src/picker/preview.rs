@@ -27,6 +27,11 @@ pub struct PreviewContext<'a> {
     /// Muted footnote rendered after `lines` - e.g. "+12 more lines"
     /// for a block preview truncated at [`BLOCK_PREVIEW_LINES`].
     pub note: Option<String>,
+    /// The match's own 0-based line index and the pane buffer's total
+    /// line count — feeds the preview border title's position/freshness
+    /// (`preview · L1204/1309 · 105↑`; for blocks, the first content
+    /// line's position). `None` when unresolvable.
+    pub position: Option<(usize, usize)>,
 }
 
 /// Up to 3 lines before and after the line `m` was found on, from the
@@ -79,6 +84,7 @@ pub fn context_lines<'a>(
         span_chars,
         highlight_all: false,
         note: None,
+        position: Some((line_no, all.len())),
     })
 }
 
@@ -103,6 +109,7 @@ fn block_lines<'a>(m: &Match, text: &'a str) -> Option<PreviewContext<'a>> {
         span_chars: (0, 0),
         highlight_all: true,
         note,
+        position: Some((first, all.len())),
     })
 }
 
@@ -236,6 +243,7 @@ mod tests {
         assert_eq!(ctx.lines, vec!["alpha", "beta"]);
         assert_eq!(ctx.span_chars, (0, 0));
         assert!(ctx.note.is_none());
+        assert_eq!(ctx.position, Some((2, 5))); // content starts on line 2 of 5
     }
 
     #[test]
@@ -256,5 +264,8 @@ mod tests {
         assert_eq!(ctx.lines[0], "line-00");
         assert_eq!(ctx.lines[cap - 1], "line-23");
         assert_eq!(ctx.note.as_deref(), Some("+6 more lines"));
+        // 33 lines total (before + fence + 30 content + close fence);
+        // the block starts on line 2.
+        assert_eq!(ctx.position, Some((2, 33)));
     }
 }

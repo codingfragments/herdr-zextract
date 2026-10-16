@@ -30,6 +30,14 @@ gutter prefixes are removed, so copy/insert hands over a clean
 snippet. Blocks longer than 200 lines are skipped, and the matches
 inside a block (URLs, commands, …) still appear as their own rows.
 
+Every match also carries its *freshness* — how far above the bottom
+of its pane buffer it sits (`↑105`, `↑0` = newest line). With equal
+fuzzy scores the list orders freshest-first (an empty query means
+fully freshness-ordered), and the preview title shows the exact
+position (`preview · L1204/1309 · 105↑`) — what tells two
+near-identical URLs or commands apart when only a token differs.
+Toggle the displays via `[ui].freshness`.
+
 Fills the same gap tmux users cover with `extrakto` / `fingers` /
 `fzf-links`.
 

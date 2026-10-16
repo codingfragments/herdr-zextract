@@ -921,6 +921,37 @@ is itself a fenced block could yield the inner fence stripped too),
 shared detection crate for `herdr-flash` + `herdr-zextract` instead of
 a ported copy, and a `MAX_BLOCK_LINES` config knob.
 
+### Phase 13 — freshness: match position as a list signal
+
+**Status:** implemented on `feature/freshness` (beyond-parity
+feature).
+
+**Prompt:** Near-identical matches (the same command or URL printed
+repeatedly, only a token differing) are indistinguishable in the
+list and preview — and once a query is typed, nucleo's scores for
+them are near-identical too, so the order is effectively arbitrary.
+Scrollback has no timestamps, so the only truthful freshness signal
+is *where* in the pane buffer a match sits.
+
+**Design:** `picker/freshness.rs` — pure line tables (`PanePositions`,
+precomputed newline offsets, rebuilt wherever `pane_texts` is
+replaced) with `distance_from_bottom` (0 = newest line). The list's
+`refilter` re-sorts the filtered result by `(score desc, distance
+asc)`: fuzzy relevance stays primary, freshness breaks ties — and
+with an empty query every score is 0, so the plain list is fully
+freshness-ordered. Stale pane ids sort last (`↑?`). Displays,
+configurable via `[ui].freshness = both|preview|row|off` (default
+`both`): a dim `↑N` column after the `[tag]` pill on each row, and
+the preview border title `preview · L1204/1309 · 105↑`. The tie-break
+sort itself is not configurable — it *is* the feature.
+
+**Recorded follow-ups:** a "diff against the next-newest occurrence"
+preview highlight (the user's real differentiator is often *where*
+two near-identical matches differ, e.g. which token changed), and
+per-pane relative freshness in tab-scan mode (currently distance is
+comparable across panes because each is measured against its own
+buffer bottom).
+
 ## 12. Open questions (resolved 2026-08-17)
 
 All four verified live against a real Herdr 0.8.0 install (a throwaway
