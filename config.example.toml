@@ -26,11 +26,12 @@
 # preview_open_width = "40%"
 #
 # Where the match-position/freshness signal is shown. One of:
-#   both    dim ↑N column on each list row + preview border title
+#   both    dim ↑N column at the END of each list row (only while the
+#           preview split is closed) + preview border title
 #           "preview · L1204/1309 · 105↑" (N = lines above the pane
 #           buffer's bottom; ↑0 = newest line)
 #   preview preview border title only
-#   row     list row column only
+#   row     list row column only (also only while preview is closed)
 #   off     neither display
 # The list is always freshness-tie-broken regardless (equal fuzzy
 # scores order freshest-first; empty query = fully freshness-ordered).
