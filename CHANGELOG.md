@@ -5,6 +5,34 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-10-16
+
+### Added
+
+- New `block` match type — whole code-block extraction. The picker now
+  also finds the snippet shapes modern codegen CLIs and READMEs show
+  and offers each as a single row whose value is the **stripped**
+  content (fence rows, frame rules, side bars, and number-gutter
+  prefixes removed):
+  - `fenced` — ` ``` `/`~~~` blocks from catted markdown; the info
+    string survives as the row label and the `lang` field
+    (`sh · 3 lines · curl …`)
+  - `box` — box-framed sample blocks (pi/AI-CLI rounded frames, TUI
+    boxes), full frames or clipped by the capture edge; boxed+numbered
+    content strips both layers
+  - `gutter` — `bat`/`cat -n`/`rg`-style line-numbered listings
+  - filter with `#block` (`#!block` to hide), pin verbs like `cmd`
+    (insert/copy-raw), `type_block` color slot, and a block-aware
+    preview showing the whole block (24-line cap, `+N more lines`)
+  - blocks over 200 lines are skipped, and the matches *inside* a
+    block (URLs, commands, …) still appear as their own rows
+  - box/gutter detection is ported from the sister `herdr-flash`
+    plugin's `decor.rs`
+- `just install` — swap the local dev link for the released plugin
+  from GitHub: unlinks any dev plugin and runs `herdr plugin install
+  codingfragments/herdr-zextract`, defaulting to the rolling `latest`
+  tag; pin with `just install v0.3.0`.
+
 ## [0.2.0] - 2026-10-08
 
 ### Added
