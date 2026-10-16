@@ -21,6 +21,7 @@
 //! `doc/config-reference.md` for why this port splits its own render
 //! area instead of resizing the real popup pane like the original does.
 
+pub mod freshness;
 pub mod fuzzy;
 pub mod preview;
 pub mod query;
@@ -228,6 +229,11 @@ struct State {
     /// the preview pane slices `context_lines` out of this using a
     /// match's `__pane_id` field. Replaced wholesale on every regrab.
     pane_texts: HashMap<String, String>,
+    /// Precomputed newline-offset tables for [`State::pane_texts`],
+    /// rebuilt in the same step whenever `pane_texts` is replaced —
+    /// feeds the freshness tie-break, the `↑N` row column, and the
+    /// preview position title (see [`freshness`]).
+    pane_positions: HashMap<String, freshness::PanePositions>,
     /// `p` (List mode) / `Ctrl-P` (either mode) toggles this.
     preview_open: bool,
 }
@@ -244,6 +250,10 @@ impl State {
             preview_open,
             grab_cycler,
         } = launch;
+        let pane_positions = pane_texts
+            .iter()
+            .map(|(id, text)| (id.clone(), freshness::PanePositions::build(text)))
+            .collect();
         let mut state = Self {
             matches,
             custom_tags: custom_tags.to_vec(),
@@ -262,10 +272,32 @@ impl State {
             config: config.clone(),
             grab_cycler,
             pane_texts,
+            pane_positions,
             preview_open,
         };
         state.refilter();
         state
+    }
+
+    /// Rebuild [`State::pane_positions`] from the current
+    /// [`State::pane_texts`] — called wherever `pane_texts` is
+    /// replaced (construction, regrab cycle).
+    fn rebuild_pane_positions(&mut self) {
+        self.pane_positions = self
+            .pane_texts
+            .iter()
+            .map(|(id, text)| (id.clone(), freshness::PanePositions::build(text)))
+            .collect();
+    }
+
+    /// Lines from the bottom of this match's pane buffer (0 = on the
+    /// newest line) — the freshness signal. `None` when the pane text
+    /// is unavailable (a stale match from just before a regrab);
+    /// callers treat that as oldest and render `↑?`.
+    fn line_distance_from_bottom(&self, m: &Match) -> Option<usize> {
+        let id = m.fields.get("__pane_id")?;
+        let p = self.pane_positions.get(id)?;
+        Some(freshness::distance_from_bottom(p, m.span.0))
     }
 
     /// Re-capture and re-extract with the next grab profile in the
@@ -279,6 +311,7 @@ impl State {
             Ok(result) => {
                 self.matches = result.matches;
                 self.pane_texts = result.pane_texts;
+                self.rebuild_pane_positions();
                 self.selected.clear();
                 self.refilter();
                 self.message = Some((
@@ -388,6 +421,34 @@ impl State {
                 })
             })
             .collect();
+
+        // Freshness tie-break: equal fuzzy scores order freshest-first
+        // (smallest distance-from-buffer-bottom first). With an empty
+        // query every score is 0, so the plain list is fully
+        // freshness-ordered; with a typed query relevance still leads
+        // and freshness only breaks ties — exactly what separates
+        // near-identical matches that score identically. Unknown
+        // positions (stale pane id) sort last; `sort_by` is stable, so
+        // full ties keep the engine's order.
+        let matches = &self.matches;
+        let positions = &self.pane_positions;
+        self.filtered.sort_by(|a, b| {
+            let distance = |s: &ScoredMatch| {
+                matches
+                    .get(s.index)
+                    .map(|m| {
+                        m.fields
+                            .get("__pane_id")
+                            .and_then(|id| positions.get(id))
+                            .map(|p| freshness::distance_from_bottom(p, m.span.0))
+                            .unwrap_or(freshness::UNKNOWN)
+                    })
+                    .unwrap_or(freshness::UNKNOWN)
+            };
+            b.score
+                .cmp(&a.score)
+                .then_with(|| distance(a).cmp(&distance(b)))
+        });
 
         let new_selection = if let Some(prev) = prev_selected_match_idx {
             self.filtered
@@ -759,6 +820,19 @@ fn render_preview(frame: &mut Frame, area: Rect, state: &State) {
         frame.render_widget(p, area);
         return;
     };
+    // Position in the border title — `preview · L1204/1309 · 105↑` —
+    // the spot-check for telling near-identical rows apart (same
+    // link/command, different token). See `[ui].freshness`.
+    let block = if matches!(
+        state.config.ui.freshness,
+        crate::config::FreshnessDisplay::Preview | crate::config::FreshnessDisplay::Both
+    ) {
+        Block::default()
+            .borders(Borders::ALL)
+            .title(freshness::preview_title(ctx.position))
+    } else {
+        block
+    };
     let lines: Vec<Line> = if ctx.highlight_all {
         // Block matches: every line is the match itself. Highlight them
         // all in `theme.highlight`; a truncated block gets a muted
@@ -962,7 +1036,27 @@ fn render_list(frame: &mut Frame, area: Rect, state: &mut State) {
                 format!("[{}]  ", m.effective_tag()),
                 Style::default().fg(state.theme.color_for_type(m.ty)),
             );
-            let tag_overhead = m.effective_tag().chars().count() + 8 + pane_overhead; // gutter(2) + "[tag]  "
+            // Freshness column (dim, after the tag pill): lines above
+            // the pane-buffer bottom - `↑0` is the newest line. See
+            // `[ui].freshness` in doc/config-reference.md.
+            let fresh_span = if matches!(
+                state.config.ui.freshness,
+                crate::config::FreshnessDisplay::Row | crate::config::FreshnessDisplay::Both
+            ) {
+                let label = freshness::row_label(state.line_distance_from_bottom(m));
+                Some(Span::styled(
+                    format!("{label}  "),
+                    Style::default()
+                        .fg(state.theme.muted)
+                        .add_modifier(Modifier::DIM),
+                ))
+            } else {
+                None
+            };
+            let mut tag_overhead = m.effective_tag().chars().count() + 8 + pane_overhead; // gutter(2) + "[tag]  "
+            if let Some(fs) = &fresh_span {
+                tag_overhead += fs.content.chars().count();
+            }
             let avail = (area.width as usize).saturating_sub(tag_overhead);
             let use_middle = matches!(
                 m.ty,
@@ -974,6 +1068,9 @@ fn render_list(frame: &mut Frame, area: Rect, state: &mut State) {
                 spans.push(ps);
             }
             spans.push(tag_span);
+            if let Some(fs) = fresh_span {
+                spans.push(fs);
+            }
             spans.extend(highlight_spans(&display, &s.indices, state.theme.highlight));
             ListItem::new(Line::from(spans))
         })
@@ -1308,6 +1405,126 @@ mod grab_label_tests {
     #[test]
     fn omits_line_cap_for_viewport() {
         assert_eq!(grab_label_text(&state_at("viewport")), "grab:viewport");
+    }
+}
+
+#[cfg(test)]
+mod freshness_tests {
+    //! The refilter freshness tie-break: equal fuzzy scores order by
+    //! distance from the pane-buffer bottom (freshest first). With an
+    //! empty query every score is 0, so the list is fully
+    //! freshness-ordered — the everyday entry state.
+    use super::*;
+    use crate::matcher::{Match, MatchType};
+
+    fn make_match(pane_id: &str, raw: &str, span: (usize, usize)) -> Match {
+        Match {
+            ty: MatchType::Url,
+            raw: raw.to_string(),
+            display: raw.to_string(),
+            context: raw.to_string(),
+            span,
+            fields: HashMap::from([("__pane_id".to_string(), pane_id.to_string())]),
+        }
+    }
+
+    fn state_with(pane_text: &str, matches: Vec<Match>) -> State {
+        let config = crate::config::Config::default();
+        let grab_cycler = crate::grab::GrabCycler::new(
+            &config,
+            &HashSet::new(),
+            None,
+            "quick",
+            "/tmp/socket".to_string(),
+            "pane1".to_string(),
+            "tab1".to_string(),
+        );
+        State::new(LaunchArgs {
+            matches,
+            pane_texts: HashMap::from([("p1".to_string(), pane_text.to_string())]),
+            custom_tags: &[],
+            config_missing: false,
+            config: &config,
+            initial_query: "",
+            preview_open: false,
+            grab_cycler,
+        })
+    }
+
+    fn filtered_raws(state: &State) -> Vec<&str> {
+        state
+            .filtered
+            .iter()
+            .filter_map(|s| state.matches.get(s.index))
+            .map(|m| m.raw.as_str())
+            .collect()
+    }
+
+    /// The user's exact pain: two near-identical URLs (same command,
+    /// only a token differs) — the fresher one must list first, both
+    /// with an empty query (everything scores 0) and with a typed
+    /// query both match equally.
+    #[test]
+    fn freshest_of_two_near_identical_matches_lists_first() {
+        let text = "curl https://api.example.com/v1/tokens/OLD\nthinking…\nthinking…\ncurl https://api.example.com/v1/tokens/NEW\ndone";
+        let old_span = (5, text.find("OLD").unwrap() + 3);
+        let new_start = text.find("NEW").unwrap() - "https://api.example.com/v1/tokens/".len();
+        let new_end = text.find("NEW").unwrap() + 3;
+        let old = make_match("p1", "https://api.example.com/v1/tokens/OLD", old_span);
+        let new = make_match(
+            "p1",
+            "https://api.example.com/v1/tokens/NEW",
+            (new_start, new_end),
+        );
+
+        // Empty query: full freshness order (scores all tie at 0).
+        let state = state_with(text, vec![old.clone(), new.clone()]);
+        assert_eq!(
+            filtered_raws(&state),
+            vec![
+                "https://api.example.com/v1/tokens/NEW",
+                "https://api.example.com/v1/tokens/OLD"
+            ]
+        );
+
+        // Typed query both match: identical match positions → equal
+        // scores → still freshest first.
+        let mut state = state_with(text, vec![old, new]);
+        state.query = "tokens".to_string();
+        state.refilter();
+        assert_eq!(
+            filtered_raws(&state),
+            vec![
+                "https://api.example.com/v1/tokens/NEW",
+                "https://api.example.com/v1/tokens/OLD"
+            ]
+        );
+    }
+
+    #[test]
+    fn unknown_pane_sorts_last_but_survives() {
+        let text = "a https://x.io/old\nb https://x.io/new\n";
+        let old = make_match("p1", "https://x.io/old", (2, 18));
+        let new = make_match("p1", "https://x.io/new", (20, 36));
+        let stale = make_match("gone", "https://x.io/stale", (0, 1));
+        let state = state_with(text, vec![old, new, stale]);
+        assert_eq!(
+            filtered_raws(&state),
+            vec!["https://x.io/new", "https://x.io/old", "https://x.io/stale"]
+        );
+    }
+
+    #[test]
+    fn line_distance_uses_each_matchs_own_pane_table() {
+        let state = state_with("one\ntwo\nthree", vec![]);
+        let on_last = make_match("p1", "three", (8, 13));
+        let on_first = make_match("p1", "one", (0, 3));
+        assert_eq!(state.line_distance_from_bottom(&on_last), Some(0));
+        assert_eq!(state.line_distance_from_bottom(&on_first), Some(2));
+        assert_eq!(
+            state.line_distance_from_bottom(&make_match("gone", "x", (0, 1))),
+            None
+        );
     }
 }
 

@@ -281,6 +281,26 @@ pub enum PreviewState {
     Always,
 }
 
+/// `[ui].freshness` - where the match-position signal (lines above the
+/// pane-buffer bottom, e.g. `↑105` / `preview · L1204/1309 · 105↑`)
+/// is shown. The filtered list is *always* freshness-tie-broken
+/// (equal fuzzy scores order freshest-first; an empty query scores
+/// everything 0, so the plain list is fully freshness-ordered) -
+/// this key only controls the two *displays*.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum FreshnessDisplay {
+    /// Row column `↑N` plus the preview title (default).
+    #[default]
+    Both,
+    /// Preview title only - rows stay as they were.
+    Preview,
+    /// Row column only.
+    Row,
+    /// Neither display; the sort tie-break still applies.
+    Off,
+}
+
 /// `[ui]` block - preview pane sizing/default state. Parsed here;
 /// consumed by Phase 9's rendering.
 #[derive(Debug, Clone, Deserialize)]
@@ -291,6 +311,10 @@ pub struct UiConfig {
     pub preview_open_width: String,
     #[serde(default = "default_preview_closed_width")]
     pub preview_closed_width: String,
+    /// Where the freshness/position signal is shown - see
+    /// [`FreshnessDisplay`]. Sort tie-break always applies.
+    #[serde(default)]
+    pub freshness: FreshnessDisplay,
 }
 
 impl Default for UiConfig {
@@ -299,6 +323,7 @@ impl Default for UiConfig {
             preview: PreviewState::default(),
             preview_open_width: default_preview_open_width(),
             preview_closed_width: default_preview_closed_width(),
+            freshness: FreshnessDisplay::default(),
         }
     }
 }
