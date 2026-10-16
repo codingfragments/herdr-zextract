@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-10-16
+
+### Fixed
+
+- The freshness `↑N` row label moved to the *end* of each list row —
+  between the `[tag]` pill and the match text it was too noisy — and
+  now renders only while the preview split is *closed*: with the
+  preview open its border title already carries the position, so the
+  column was redundant. `[ui].freshness = "both"` now means exactly
+  one display surface at a time (rows while closed, title while
+  open).
+
 ## [0.4.0] - 2026-10-16
 
 ### Added
