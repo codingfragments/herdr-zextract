@@ -5,6 +5,29 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-10-16
+
+### Added
+
+- Freshness display is now configurable per surface, replacing the
+  fixed one-surface-at-a-time coupling from 0.4.1:
+  - `[ui].freshness_row = "auto" | "on" | "off"` — the `↑N` row
+    column. `auto` (default) = only while the preview split is
+    closed; `on` = always, so you can compare distances across all
+    rows *with the preview open* (its title shows only the
+    highlighted row's position); `off` = never
+  - `[ui].freshness_preview = "auto" | "on" | "off"` — the
+    `preview · L1204/1309 · 105↑` border title; `off` gives a plain
+    `preview` title
+  - both default to `auto`, i.e. the 0.4.1 behavior
+
+### Changed
+
+- The single `[ui].freshness = "both" | "preview" | "row" | "off"`
+  key from 0.4.0–0.4.1 is **removed** in favor of the two tri-states.
+  Unknown keys are ignored by serde, so a stale config degrades to
+  the defaults rather than breaking.
+
 ## [0.4.1] - 2026-10-16
 
 ### Fixed
