@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use crate::matcher::Match;
+use crate::matcher::{Match, MatchType};
 
 /// A slice of a pane's captured text, centered (as closely as the pane
 /// boundaries allow) on `m`'s source line.
@@ -20,6 +20,13 @@ pub struct PreviewContext<'a> {
     /// couldn't be resolved, e.g. a span the matcher recorded past the
     /// line's own length.
     pub span_chars: (usize, usize),
+    /// Block matches (`ty == Block`) set this: every line in `lines`
+    /// *is* the match, so the renderer highlights them all instead of
+    /// singling out `current`.
+    pub highlight_all: bool,
+    /// Muted footnote rendered after `lines` - e.g. "+12 more lines"
+    /// for a block preview truncated at [`BLOCK_PREVIEW_LINES`].
+    pub note: Option<String>,
 }
 
 /// Up to 3 lines before and after the line `m` was found on, from the
@@ -34,6 +41,11 @@ pub fn context_lines<'a>(
 ) -> Option<PreviewContext<'a>> {
     let pane_id = m.fields.get("__pane_id")?;
     let text = pane_texts.get(pane_id)?;
+    // A block match's span covers its content lines directly - show
+    // the whole block (capped) instead of ±3 lines around its first.
+    if m.ty == MatchType::Block {
+        return block_lines(m, text);
+    }
     // `span.0`/`span.1` are byte offsets into `text` from the same
     // extraction pass (every built-in pattern module tracks them via
     // `text.lines()` + "+1 for the newline", the same coordinate space
@@ -65,6 +77,32 @@ pub fn context_lines<'a>(
         lines: all[start..=end].to_vec(),
         current: line_no - start,
         span_chars,
+        highlight_all: false,
+        note: None,
+    })
+}
+
+/// Block-match preview: the span's own line range, capped at
+/// [`BLOCK_PREVIEW_LINES`] with a "+N more lines" note. Every shown
+/// line is part of the match, so `highlight_all` is set and
+/// `span_chars` is unused (`(0, 0)`).
+fn block_lines<'a>(m: &Match, text: &'a str) -> Option<PreviewContext<'a>> {
+    let all: Vec<&str> = text.lines().collect();
+    if all.is_empty() {
+        return None;
+    }
+    let first = text[..m.span.0].matches('\n').count().min(all.len() - 1);
+    let last = text[..m.span.1].matches('\n').count().min(all.len() - 1);
+    let last = last.max(first);
+    let cap = crate::matcher::block::BLOCK_PREVIEW_LINES;
+    let shown_end = last.min(first + cap - 1);
+    let note = ((last - first + 1) > cap).then(|| format!("+{} more lines", last - shown_end));
+    Some(PreviewContext {
+        lines: all[first..=shown_end].to_vec(),
+        current: 0,
+        span_chars: (0, 0),
+        highlight_all: true,
+        note,
     })
 }
 
@@ -170,5 +208,53 @@ mod tests {
         let pane_texts = HashMap::from([("p1".to_string(), "text".to_string())]);
         let m = make_match("gone", 0);
         assert!(context_lines(&m, &pane_texts).is_none());
+    }
+
+    fn make_block_match(span: (usize, usize)) -> Match {
+        Match {
+            ty: MatchType::Block,
+            raw: "x".to_string(),
+            display: "x".to_string(),
+            context: "x".to_string(),
+            span,
+            fields: HashMap::from([("__pane_id".to_string(), "p1".to_string())]),
+        }
+    }
+
+    #[test]
+    fn block_match_previews_whole_block() {
+        let text = "before\n```sh\nalpha\nbeta\n```".to_string();
+        let pane_texts = HashMap::from([("p1".to_string(), text)]);
+        // Content lines are "alpha\nbeta": from after "```sh\n" to
+        // before the trailing "\n```".
+        let start = "before\n```sh\n".len();
+        let end = "before\n```sh\nalpha\nbeta".len();
+        let m = make_block_match((start, end));
+        let ctx = context_lines(&m, &pane_texts).unwrap();
+        assert!(ctx.highlight_all);
+        assert_eq!(ctx.current, 0);
+        assert_eq!(ctx.lines, vec!["alpha", "beta"]);
+        assert_eq!(ctx.span_chars, (0, 0));
+        assert!(ctx.note.is_none());
+    }
+
+    #[test]
+    fn long_block_preview_is_capped_with_note() {
+        let mut text = String::from("before\n```sh\n");
+        for i in 0..30 {
+            text.push_str(&format!("line-{i:02}\n"));
+        }
+        text.push_str("```");
+        let start = "before\n```sh\n".len();
+        let end = text.len() - "\n```".len();
+        let pane_texts = HashMap::from([("p1".to_string(), text)]);
+        let m = make_block_match((start, end));
+        let ctx = context_lines(&m, &pane_texts).unwrap();
+        let cap = crate::matcher::block::BLOCK_PREVIEW_LINES;
+        assert!(ctx.highlight_all);
+        assert_eq!(ctx.lines.len(), cap);
+        assert_eq!(ctx.lines[0], "line-00");
+        assert_eq!(ctx.lines[cap - 1], "line-23");
+        assert_eq!(ctx.note.as_deref(), Some("+6 more lines"));
     }
 }

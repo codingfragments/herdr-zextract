@@ -65,6 +65,7 @@ struct Theme {
     type_quoted: Color,
     type_command: Color,
     type_secret: Color,
+    type_block: Color,
 }
 
 impl Theme {
@@ -91,6 +92,7 @@ impl Theme {
             type_quoted: c(&colors.type_quoted, Color::Gray),
             type_command: c(&colors.type_command, Color::LightMagenta),
             type_secret: c(&colors.type_secret, Color::LightRed),
+            type_block: c(&colors.type_block, Color::LightBlue),
         }
     }
 
@@ -107,6 +109,7 @@ impl Theme {
             MatchType::QuotedString => self.type_quoted,
             MatchType::Command => self.type_command,
             MatchType::Secret => self.type_secret,
+            MatchType::Block => self.type_block,
         }
     }
 
@@ -756,27 +759,51 @@ fn render_preview(frame: &mut Frame, area: Rect, state: &State) {
         frame.render_widget(p, area);
         return;
     };
-    let lines: Vec<Line> = ctx
-        .lines
-        .iter()
-        .enumerate()
-        .map(|(i, line)| {
-            if i == ctx.current {
-                let base = Style::default()
-                    .fg(state.theme.highlight)
-                    .add_modifier(Modifier::BOLD);
-                let span_style = Style::default()
-                    .fg(state.theme.accent)
-                    .add_modifier(Modifier::BOLD);
-                Line::from(split_at_span(line, ctx.span_chars, base, span_style))
-            } else {
+    let lines: Vec<Line> = if ctx.highlight_all {
+        // Block matches: every line is the match itself. Highlight them
+        // all in `theme.highlight`; a truncated block gets a muted
+        // "+N more lines" footnote from `preview::block_lines`.
+        let mut ls: Vec<Line> = ctx
+            .lines
+            .iter()
+            .map(|line| {
                 Line::from(Span::styled(
                     line.to_string(),
-                    Style::default().fg(state.theme.muted),
+                    Style::default()
+                        .fg(state.theme.highlight)
+                        .add_modifier(Modifier::BOLD),
                 ))
-            }
-        })
-        .collect();
+            })
+            .collect();
+        if let Some(note) = &ctx.note {
+            ls.push(Line::from(Span::styled(
+                note.clone(),
+                Style::default().fg(state.theme.muted),
+            )));
+        }
+        ls
+    } else {
+        ctx.lines
+            .iter()
+            .enumerate()
+            .map(|(i, line)| {
+                if i == ctx.current {
+                    let base = Style::default()
+                        .fg(state.theme.highlight)
+                        .add_modifier(Modifier::BOLD);
+                    let span_style = Style::default()
+                        .fg(state.theme.accent)
+                        .add_modifier(Modifier::BOLD);
+                    Line::from(split_at_span(line, ctx.span_chars, base, span_style))
+                } else {
+                    Line::from(Span::styled(
+                        line.to_string(),
+                        Style::default().fg(state.theme.muted),
+                    ))
+                }
+            })
+            .collect()
+    };
     let p = Paragraph::new(lines).block(block);
     frame.render_widget(p, area);
 }

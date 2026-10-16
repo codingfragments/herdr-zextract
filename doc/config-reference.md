@@ -107,7 +107,7 @@ disable = ["secret", "ipv6"]
 names. Listed patterns are skipped entirely, for every invocation.
 
 **Built-in type tags:** `url`, `file`, `diag`, `git`, `sha`, `ipv4`,
-`ipv6`, `uuid`, `quote`, `cmd`, `secret`
+`ipv6`, `uuid`, `quote`, `cmd`, `secret`, `block`
 
 ---
 
@@ -408,6 +408,7 @@ Each slot controls the `[tag]` pill in the list.
 | `type_quoted` | `"gray"` | `quote` |
 | `type_command` | `"light_magenta"` | `cmd` |
 | `type_secret` | `"light_red"` | `secret` |
+| `type_block` | `"light_blue"` | `block` |
 
 ### Theme presets
 

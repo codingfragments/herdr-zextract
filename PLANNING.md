@@ -886,6 +886,41 @@ describe what exists, not aspirational features.
 2. Follow each `doc/use-cases.md` walkthrough manually and confirm the
    described behavior matches what actually happens.
 
+### Phase 12 — `block` type: fenced/box/gutter code-block extraction
+
+**Status:** implemented on `feature/block-extract` (beyond-parity
+feature; no upstream original for this one).
+
+**Prompt:** Modern codegen CLIs and READMEs *show* snippets — fenced
+` ``` `/`~~~` blocks in catted markdown, box-framed sample output
+(pi/AI-CLI rounded frames), line-numbered listings (`bat`, `rg`).
+Extract those whole, with the decoration stripped, as a new `block`
+match type in the picker list.
+
+**Design:** `matcher/block.rs` is a pure whole-buffer scan ported
+from the sister `herdr-flash` plugin's `decor.rs` box/gutter detection
+(per-selection there, buffer-wide here), plus a fence scanner.
+Arbitration: a fence overlapping a box/gutter wins; a gutter inside a
+box drops (the box strip already removes the inner numbers);
+otherwise outermost wins. Caps: blocks > 200 content lines are
+skipped, and the preview shows the first 24 lines with a `+N more`
+note. `raw` is the *stripped* content; `context` is the verbatim
+opening line (fence row / top rule); fields carry `kind`
+(`fenced`/`box`/`gutter`), `lines`, and `lang` (fence info string).
+Default verbs: insert/copy-raw, like `cmd`.
+
+**Known consequence (by design):** pipeline dedup is by raw text, so
+(a) two byte-identical blocks collapse to the latest — same as every
+type — and (b) a one-line block whose raw equals a higher-priority
+match's raw (e.g. a bare `make install` fence vs. the `cmd` match)
+keeps the higher-priority type. Specific matches inside a block
+(URLs, commands, …) always survive — different raws never collide.
+
+**Recorded follow-ups:** de-fence boxed snippets (a box whose content
+is itself a fenced block could yield the inner fence stripped too),
+shared detection crate for `herdr-flash` + `herdr-zextract` instead of
+a ported copy, and a `MAX_BLOCK_LINES` config knob.
+
 ## 12. Open questions (resolved 2026-08-17)
 
 All four verified live against a real Herdr 0.8.0 install (a throwaway

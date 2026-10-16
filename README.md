@@ -12,14 +12,23 @@ with type-aware actions.
 
 Press a keybind → a picker opens → the scrollback of the previously
 focused pane is scanned for URLs, file paths, diagnostics, commands,
-secrets, UUIDs, IPs, and any custom patterns you configure → you
-fuzzy-filter, pick, and act:
+secrets, UUIDs, IPs, **whole code blocks**, and any custom patterns
+you configure → you fuzzy-filter, pick, and act:
 
 - **open** a URL in the browser
 - **edit** a file at the matched line in your editor
 - **copy** the match to the clipboard
 - **insert** it back into the source pane's prompt
 - **export** a selection as JSON
+
+Code blocks (tag `block`, filter with `#block`) are the snippets
+modern codegen CLIs and READMEs show: fenced ` ``` ` blocks, box-
+framed sample output (pi-style rounded frames, TUI boxes), and
+line-numbered listings (`bat`, `cat -n`, `rg`). A block's value is
+its *stripped* content — fence rows, frame rules, side bars, and
+gutter prefixes are removed, so copy/insert hands over a clean
+snippet. Blocks longer than 200 lines are skipped, and the matches
+inside a block (URLs, commands, …) still appear as their own rows.
 
 Fills the same gap tmux users cover with `extrakto` / `fingers` /
 `fzf-links`.
