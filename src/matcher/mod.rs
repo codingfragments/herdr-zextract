@@ -12,6 +12,7 @@
 //!   - Per-pattern timing instrumentation - not needed until there's a
 //!     debug log to feed.
 
+pub mod block;
 pub mod command;
 pub mod custom;
 pub mod diagnostic;
@@ -75,6 +76,9 @@ pub enum MatchType {
     QuotedString,
     Command,
     Secret,
+    /// A whole detected code block (fenced / box-framed / guttered)
+    /// whose `raw` is the stripped content — see `matcher::block`.
+    Block,
 }
 
 impl MatchType {
@@ -91,6 +95,7 @@ impl MatchType {
             MatchType::QuotedString => "quote",
             MatchType::Command => "cmd",
             MatchType::Secret => "secret",
+            MatchType::Block => "block",
         }
     }
 
@@ -109,6 +114,7 @@ impl MatchType {
             "quote" => Some(Self::QuotedString),
             "cmd" => Some(Self::Command),
             "secret" => Some(Self::Secret),
+            "block" => Some(Self::Block),
             _ => None,
         }
     }
@@ -129,6 +135,9 @@ pub const TYPE_PRIORITY: &[MatchType] = &[
     MatchType::Command,
     MatchType::Secret, // entropy fallback is broad; let specific types win
     MatchType::QuotedString,
+    // A whole block is the broadest match of all — always last, so
+    // every specific type keeps its rank bonus and dedup precedence.
+    MatchType::Block,
 ];
 
 fn type_priority_index(ty: MatchType) -> usize {
@@ -213,6 +222,9 @@ pub fn extract_with_config(text: &str, config: &crate::config::Config) -> Vec<Ma
     }
     if !dis.contains("secret") {
         all.extend(secret::extract(text, config.secret_entropy_filter));
+    }
+    if !dis.contains("block") {
+        all.extend(block::extract(text));
     }
     all.extend(custom::extract(text, &config.custom, dis));
 
@@ -426,6 +438,99 @@ mod fixture_tests {
                 "stress fixture missing required type {required:?}"
             );
         }
+    }
+
+    #[test]
+    fn blocks_fixture_finds_fenced_box_and_gutter_kinds() {
+        let text = include_str!("../../tests/fixtures/blocks.txt");
+        let matches = extract(text);
+        let blocks: Vec<&Match> = matches
+            .iter()
+            .filter(|m| m.ty == MatchType::Block)
+            .collect();
+        assert!(!blocks.is_empty());
+
+        let by_kind = |k: &str| {
+            blocks
+                .iter()
+                .filter(|m| m.fields.get("kind").map(String::as_str) == Some(k))
+                .count()
+        };
+        assert!(by_kind("fenced") >= 4, "fenced: {blocks:?}");
+        assert!(by_kind("box") >= 3, "box: {blocks:?}");
+        assert!(by_kind("gutter") >= 2, "gutter: {blocks:?}");
+
+        // Fence info strings survive into fields.
+        let sh = blocks
+            .iter()
+            .find(|m| m.fields.get("lang").map(String::as_str) == Some("sh"))
+            .expect("sh fence");
+        assert!(sh.raw.contains("curl -fsSL https://demo.example.com"));
+        assert!(sh.raw.starts_with("curl"));
+
+        // Boxed+numbered content strips both layers.
+        assert!(
+            blocks
+                .iter()
+                .any(|m| m.fields.get("kind") == Some(&"box".to_string())
+                    && m.raw == "cd ~/x\ngit pull"),
+            "boxed+numbered raw not found: {blocks:?}"
+        );
+
+        // A fence inside a box is box content, not a block of its own.
+        let snippet = blocks
+            .iter()
+            .find(|m| m.raw.contains("demo run --all"))
+            .expect("snippet frame");
+        assert_eq!(snippet.fields["kind"], "box");
+        assert!(snippet.raw.contains("```sh"));
+
+        // Decoration never leaks into raw: no rule rows, no side bars,
+        // no gutter prefixes, in any block of any kind.
+        for m in &blocks {
+            assert!(!m.raw.contains('╭') && !m.raw.contains('╰'));
+            assert!(!m.raw.contains('╮') && !m.raw.contains('╯'));
+            for line in m.raw.lines() {
+                assert!(
+                    !line.starts_with('│') && !line.starts_with('┃'),
+                    "bar leaked into raw: {line:?}"
+                );
+                assert!(
+                    !line.starts_with("12:") && !line.starts_with("10 │"),
+                    "gutter leaked into raw: {line:?}"
+                );
+            }
+        }
+
+        // Negatives: none of the look-alikes may appear in any raw.
+        for forbidden in ["never closes", "apples", "art", "more code", "| key |"] {
+            assert!(
+                !blocks.iter().any(|m| m.raw.contains(forbidden)),
+                "look-alike `{forbidden}` extracted as a block"
+            );
+        }
+    }
+
+    #[test]
+    fn blocks_do_not_hide_matches_inside_them() {
+        // The pipeline dedups by raw text only, so a block never swallows
+        // the specific matches (url, file, cmd) inside its lines.
+        let text = include_str!("../../tests/fixtures/blocks.txt");
+        let matches = extract(text);
+        assert!(matches
+            .iter()
+            .any(|m| m.ty == MatchType::Url && m.raw.contains("demo.example.com")));
+        assert!(matches
+            .iter()
+            .any(|m| m.ty == MatchType::Block && m.raw.contains("demo.example.com")));
+    }
+
+    #[test]
+    fn duplicate_identical_blocks_dedupe_to_one() {
+        // Two byte-identical fenced snippets collapse to the latest
+        // occurrence — same (type, raw) rule as every other type.
+        let text = "```sh\nalpha\n```\n\n```sh\nalpha\n```";
+        assert_eq!(count_by_type(text, MatchType::Block), 1);
     }
 
     fn cp(name: &str, regex: &str, template: Option<&str>) -> crate::config::CustomPattern {

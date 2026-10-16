@@ -159,6 +159,9 @@ fn static_allowed_verbs(ty: MatchType) -> &'static [Verb] {
         Uuid => &[CopyRaw, Insert],
         QuotedString => &[CopyRaw, CopyDisplay, Insert, InsertDisplay],
         Command => &[Insert, CopyRaw],
+        // A whole block is a snippet: insert it back into the pane or
+        // copy it — nothing to open/edit/reveal.
+        Block => &[Insert, CopyRaw],
         // Secret: never open/edit - hardcoded deny below too.
         Secret => &[CopyRaw, Insert],
     }
@@ -173,7 +176,7 @@ fn static_default_verb(ty: MatchType) -> Verb {
     match ty {
         Url => Open,
         Diagnostic => Edit,
-        File | Command | Git | Sha | Ipv4 | Ipv6 | Uuid | QuotedString | Secret => Insert,
+        File | Command | Git | Sha | Ipv4 | Ipv6 | Uuid | QuotedString | Secret | Block => Insert,
     }
 }
 

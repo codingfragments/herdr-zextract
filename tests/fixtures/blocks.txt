@@ -1,0 +1,91 @@
+$ cat README.md
+# demo-tool
+
+Install the CLI:
+
+```sh
+curl -fsSL https://demo.example.com/install.sh | bash
+export PATH="$HOME/.demo/bin:$PATH"
+demo --version
+```
+
+Quickstart:
+
+```python
+from demo import Client
+
+c = Client()
+c.panes()
+```
+
+One-liner config:
+
+```
+set -gx DEMO_HOME ~/.config/demo
+```
+
+Tilde fences work too:
+
+~~~
+herdr config set theme macchiato
+herdr config show
+~~~
+
+(This next fence is never closed — it must not extract, and it must
+not swallow anything after it:)
+
+~~~ruby
+this tilde fence never closes
+
+Here is the pi block from the wild:
+
+╭· fish ·····································╮
+│   cd ~/.dotfiles/dotSrc/app_coding_agents  │
+│   git checkout feat/demo-s5                │
+│                                            │
+│   # 1. Temp workspace                      │
+╰············································╯
+
+A boxed, numbered listing (box wins, numbers strip with it):
+
+╭─────────────────╮
+│   1 │ cd ~/x    │
+│   2 │ git pull  │
+╰─────────────────╯
+
+A codegen CLI snippet frame (the fences inside are box *content*):
+
+╭─ snippet ────────╮
+│ ```sh           │
+│ demo run --all  │
+│ ```             │
+╰─────────────────╯
+
+bat output:
+
+   1 │ herdr plugin pane open --placement popup
+   2 │ herdr --version
+  10 │ herdr doctor
+
+rg multi-file:
+
+src/main.rs:12:fn main() {
+src/main.rs:13:    println!("hi");
+src/main.rs:14:}
+
+Look-alikes — none of these may extract as blocks:
+
+| key | value |
+|-----|-------|
+| a   | 1     |
+
++--------+
+|  art   |
++--------+
+
+12: this is code
+5: more code
+99: more code
+
+3 apples
+4 pears

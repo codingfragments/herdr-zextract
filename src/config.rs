@@ -262,6 +262,7 @@ pub struct ColorsConfig {
     pub type_quoted: Option<String>,
     pub type_command: Option<String>,
     pub type_secret: Option<String>,
+    pub type_block: Option<String>,
 }
 
 /// Preview pane launch-state default, ported from the original's
