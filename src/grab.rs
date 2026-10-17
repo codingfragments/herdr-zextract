@@ -82,6 +82,29 @@ pub struct PaneCapture {
     pub text: String,
 }
 
+// ── Cycle-list resolution ─────────────────────────────────────────────────────
+
+/// Resolve the cycler's cycle list from the launching profile's
+/// `grab_cycle`: keep only known names (order as configured, unknown
+/// names dropped), falling back to the full list when the restriction
+/// names nothing known - a typo in `grab_cycle` degrades to today's
+/// cycle-everything behavior instead of leaving nothing to cycle
+/// through. Pure, for unit testing without a socket.
+fn resolve_cycle_names(all: Vec<String>, cycle: Option<&[String]>) -> Vec<String> {
+    match cycle {
+        Some(list) => {
+            let restricted: Vec<String> =
+                list.iter().filter(|n| all.contains(n)).cloned().collect();
+            if restricted.is_empty() {
+                all
+            } else {
+                restricted
+            }
+        }
+        None => all,
+    }
+}
+
 /// Cycles the picker's live capture through every configured grab
 /// profile (`Ctrl-G`), re-capturing and re-extracting on each step
 /// without leaving `main.rs`'s one-shot launch flow — the picker owns
@@ -104,6 +127,16 @@ pub struct GrabCycler {
     config_template: Config,
 }
 
+/// Static launch context for a [`GrabCycler`]: the socket to talk to
+/// and the pane/tab identity to capture. Bundled so `GrabCycler::new`
+/// stays under clippy's `too_many_arguments` threshold (same pattern
+/// as the picker's `LaunchArgs`).
+pub struct GrabTarget {
+    pub socket_path: String,
+    pub focused_pane_id: String,
+    pub tab_id: String,
+}
+
 impl GrabCycler {
     /// `raw_disabled` is `[patterns].disable` before any grab-profile or
     /// launch-allowlist adjustment. `allowed` is the launching profile's
@@ -113,17 +146,23 @@ impl GrabCycler {
     /// "allowlist overrides every disable source" rule. `initial_name`
     /// is the launching profile's `grab` field (or `"quick"`); cycling
     /// starts there (falling back to index 0 if unrecognized) and wraps
-    /// forward from there.
+    /// forward from there. `cycle` is the launching profile's
+    /// `grab_cycle` restriction - `None` cycles through every
+    /// configured grab profile.
     pub fn new(
         config: &Config,
         raw_disabled: &HashSet<String>,
         allowed: Option<&HashSet<String>>,
         initial_name: &str,
-        socket_path: String,
-        focused_pane_id: String,
-        tab_id: String,
+        cycle: Option<&[String]>,
+        target: GrabTarget,
     ) -> Self {
-        let names = config.cycle_grab_profile_names();
+        let GrabTarget {
+            socket_path,
+            focused_pane_id,
+            tab_id,
+        } = target;
+        let names = resolve_cycle_names(config.cycle_grab_profile_names(), cycle);
         let profiles: Vec<ResolvedGrabProfile> = names
             .iter()
             .map(|n| config.resolve_grab_profile(n))
@@ -328,16 +367,16 @@ fn capture_tab(
 mod tests {
     use super::*;
 
+    fn target() -> GrabTarget {
+        GrabTarget {
+            socket_path: "/tmp/socket".to_string(),
+            focused_pane_id: "pane1".to_string(),
+            tab_id: "tab1".to_string(),
+        }
+    }
+
     fn cycler(config: &Config, initial_name: &str) -> GrabCycler {
-        GrabCycler::new(
-            config,
-            &HashSet::new(),
-            None,
-            initial_name,
-            "/tmp/socket".to_string(),
-            "pane1".to_string(),
-            "tab1".to_string(),
-        )
+        GrabCycler::new(config, &HashSet::new(), None, initial_name, None, target())
     }
 
     #[test]
@@ -363,6 +402,56 @@ mod tests {
         );
         let c = cycler(&config, "jira-deep");
         assert_eq!(c.current_name(), "jira-deep");
+    }
+
+    #[test]
+    fn grab_cycle_restriction_keeps_listed_order_and_drops_unknown() {
+        let all = vec![
+            "quick".to_string(),
+            "deep".to_string(),
+            "viewport".to_string(),
+            "full".to_string(),
+            "tab-scan".to_string(),
+        ];
+        let restricted = resolve_cycle_names(
+            all.clone(),
+            Some(&["full".to_string(), "nope".to_string(), "deep".to_string()]),
+        );
+        assert_eq!(restricted, vec!["full".to_string(), "deep".to_string()]);
+        // No restriction → the full list, order unchanged.
+        assert_eq!(resolve_cycle_names(all.clone(), None), all);
+        // All-unknown restriction → falls back to the full cycle
+        // rather than leaving nothing to cycle through.
+        assert_eq!(
+            resolve_cycle_names(all.clone(), Some(&["nope".to_string()])),
+            all
+        );
+    }
+
+    #[test]
+    fn grab_cycle_restriction_limits_the_cycler_and_starts_at_grab() {
+        let config = Config::default();
+        let c = GrabCycler::new(
+            &config,
+            &HashSet::new(),
+            None,
+            "deep",
+            Some(&["full".to_string(), "deep".to_string()]),
+            target(),
+        );
+        // Starts at the profile's `grab` name, inside the restricted
+        // list; `quick` (the unrestricted default start) is not in it.
+        assert_eq!(c.current_name(), "deep");
+        // A `grab` name outside the restricted list starts at its head.
+        let c = GrabCycler::new(
+            &config,
+            &HashSet::new(),
+            None,
+            "quick",
+            Some(&["full".to_string(), "deep".to_string()]),
+            target(),
+        );
+        assert_eq!(c.current_name(), "full");
     }
 
     #[test]

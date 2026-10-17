@@ -254,6 +254,20 @@ impl State {
             .iter()
             .map(|(id, text)| (id.clone(), freshness::PanePositions::build(text)))
             .collect();
+        // Zero findings is not a dead end: seed the transient footer
+        // message with the active grab profile and the Ctrl-G hint so
+        // the popup opens into an actionable state instead of a bare
+        // empty list (clears on the next keystroke; the list's empty
+        // state carries the hint permanently).
+        let message = matches.is_empty().then(|| {
+            (
+                format!(
+                    "no matches in {} — Ctrl-G cycles grab profiles · Esc closes",
+                    grab_label_text_from(grab_cycler.current_name(), grab_cycler.current_profile())
+                ),
+                false,
+            )
+        });
         let mut state = Self {
             matches,
             custom_tags: custom_tags.to_vec(),
@@ -265,7 +279,7 @@ impl State {
             last_rows: 24,
             config_missing,
             config_missing_dismissed: false,
-            message: None,
+            message,
             mode: Mode::Input,
             selected: HashSet::new(),
             theme: Theme::resolve(&config.colors),
@@ -885,9 +899,7 @@ fn render_preview(frame: &mut Frame, area: Rect, state: &State) {
 /// its capture is the visible screen, not a line count, so a number
 /// there would be misleading. `full` and any custom profile left
 /// unbounded shows `(unbounded)` instead of a number.
-fn grab_label_text(state: &State) -> String {
-    let name = state.grab_cycler.current_name();
-    let profile = state.grab_cycler.current_profile();
+fn grab_label_text_from(name: &str, profile: &crate::grab::ResolvedGrabProfile) -> String {
     if profile.source == crate::grab::GrabSource::Viewport {
         return format!("grab:{name}");
     }
@@ -895,6 +907,13 @@ fn grab_label_text(state: &State) -> String {
         Some(n) => format!("grab:{name} ({n})"),
         None => format!("grab:{name} (unbounded)"),
     }
+}
+
+fn grab_label_text(state: &State) -> String {
+    grab_label_text_from(
+        state.grab_cycler.current_name(),
+        state.grab_cycler.current_profile(),
+    )
 }
 
 fn render_grab_label(frame: &mut Frame, area: Rect, state: &State, label: &str) {
@@ -979,9 +998,15 @@ fn render_input(frame: &mut Frame, area: Rect, state: &State) {
 
 fn render_list(frame: &mut Frame, area: Rect, state: &mut State) {
     if state.matches.is_empty() {
-        let p = Paragraph::new("No matches in pane scrollback.")
-            .style(Style::default().fg(state.theme.muted))
-            .block(Block::default().borders(Borders::ALL));
+        // Zero findings: keep the popup useful — name the active grab
+        // profile and point at Ctrl-G, which re-captures with the next
+        // profile in the cycle without leaving the picker.
+        let p = Paragraph::new(format!(
+            "No matches under {}.\nCtrl-G cycles grab profiles · Esc closes",
+            grab_label_text(state)
+        ))
+        .style(Style::default().fg(state.theme.muted))
+        .block(Block::default().borders(Borders::ALL));
         frame.render_widget(p, area);
         return;
     }
@@ -1379,9 +1404,12 @@ mod grab_label_tests {
             &HashSet::new(),
             None,
             initial_grab_name,
-            "/tmp/socket".to_string(),
-            "pane1".to_string(),
-            "tab1".to_string(),
+            None,
+            crate::grab::GrabTarget {
+                socket_path: "/tmp/socket".to_string(),
+                focused_pane_id: "pane1".to_string(),
+                tab_id: "tab1".to_string(),
+            },
         );
         State::new(LaunchArgs {
             matches: Vec::new(),
@@ -1408,6 +1436,19 @@ mod grab_label_tests {
     #[test]
     fn omits_line_cap_for_viewport() {
         assert_eq!(grab_label_text(&state_at("viewport")), "grab:viewport");
+    }
+
+    #[test]
+    fn empty_matches_seed_the_footer_hint() {
+        // Zero findings is not a dead end: the popup opens with the
+        // active grab named and the Ctrl-G escape hatch shown, so the
+        // user can re-capture instead of watching the popup flash shut.
+        let state = state_at("quick");
+        let (msg, is_error) = state.message.expect("hint message seeded");
+        assert!(!is_error, "informational, not an error: {msg}");
+        assert!(msg.contains("grab:quick (150)"), "{msg}");
+        assert!(msg.contains("Ctrl-G"), "{msg}");
+        assert!(msg.contains("Esc"), "{msg}");
     }
 }
 
@@ -1438,9 +1479,12 @@ mod freshness_tests {
             &HashSet::new(),
             None,
             "quick",
-            "/tmp/socket".to_string(),
-            "pane1".to_string(),
-            "tab1".to_string(),
+            None,
+            crate::grab::GrabTarget {
+                socket_path: "/tmp/socket".to_string(),
+                focused_pane_id: "pane1".to_string(),
+                tab_id: "tab1".to_string(),
+            },
         );
         State::new(LaunchArgs {
             matches,

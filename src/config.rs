@@ -367,6 +367,12 @@ pub struct Profile {
     /// or any name defined under `[grab_profiles.<name>]`). `None`
     /// defaults to `quick` at the call site.
     pub grab: Option<String>,
+    /// Restricts which grab profiles `Ctrl-G` cycles through for this
+    /// keybind. `None` (default) cycles through every configured grab
+    /// profile; `Some` keeps only the listed names (order preserved,
+    /// unknown names dropped — an all-unknown list falls back to the
+    /// full cycle). `grab` picks where the cycle starts.
+    pub grab_cycle: Option<Vec<String>>,
     /// Allowlist of type tags to extract at all, overriding `[patterns]`
     /// `disable` entirely for this invocation. `None` means no
     /// restriction (the config file's own `disable` list still applies).
@@ -861,6 +867,7 @@ prompt_markers = ["» ", "λ "]
                 patterns: Some(vec!["secret".to_string()]),
                 type_filter: None,
                 preview: None,
+                grab_cycle: None,
             },
         );
         let profile = config.resolve_profile("custom0");
@@ -966,6 +973,20 @@ prompt_markers = ["» ", "λ "]
         // - this just exercises the threshold comparison for panics.
         config.log(LogLevel::Error, "should not print");
         assert!(LogLevel::Off < LogLevel::Error);
+    }
+
+    #[test]
+    fn profile_parses_grab_cycle() {
+        let p: Profile =
+            toml::from_str("grab = \"deep\"\ngrab_cycle = [\"deep\", \"full\"]").unwrap();
+        assert_eq!(p.grab.as_deref(), Some("deep"));
+        assert_eq!(
+            p.grab_cycle.as_deref(),
+            Some(&["deep".to_string(), "full".to_string()][..])
+        );
+        // Absent → None (cycle through every configured grab profile).
+        let p: Profile = toml::from_str("grab = \"deep\"").unwrap();
+        assert!(p.grab_cycle.is_none());
     }
 
     #[test]
