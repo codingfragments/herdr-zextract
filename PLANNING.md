@@ -957,6 +957,36 @@ per-pane relative freshness in tab-scan mode (currently distance is
 comparable across panes because each is measured against its own
 buffer bottom).
 
+### Phase 14 — no-match popup stays open + per-keybind grab_cycle
+
+**Status:** implemented on `feature/no-match-grab-cycle` (beyond-parity
+feature).
+
+**Prompt:** Opening the picker over a pane with zero findings flashed
+the popup shut (`main.rs` early-returned `--- no matches found ---`),
+forcing a relaunch to try another grab scope. And while the Ctrl-G
+cycle existed, it always cycled through *every* configured grab
+profile — there was no way to say "this keybind only ever alternates
+between deep and full".
+
+**Design:** `main.rs` no longer short-circuits on empty matches;
+`State::new` seeds the transient footer message
+(`no matches in grab:<name> (N) — Ctrl-G cycles grab profiles · Esc
+closes`, informational styling) and `render_list`'s empty state names
+the active grab profile and carries the same hint permanently. A
+*failed* capture (socket error) still exits — nothing to interact
+with and no pane text at all.
+
+`[profiles.<name>].grab_cycle = ["deep", "full"]` restricts the
+cycler's list for that keybind: `GrabCycler::new` gained the
+`cycle` param plus `GrabTarget` (socket/pane/tab bundled, keeping the
+signature under clippy's `too_many_arguments` threshold); list
+resolution lives in the pure `resolve_cycle_names` (unknown names
+dropped, order preserved, all-unknown falls back to the full cycle —
+a typo degrades to cycle-everything, never cycle-nothing). `grab`
+picks the start; a `grab` outside the restricted list starts at the
+list's head.
+
 ## 12. Open questions (resolved 2026-08-17)
 
 All four verified live against a real Herdr 0.8.0 install (a throwaway

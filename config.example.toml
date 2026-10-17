@@ -91,6 +91,21 @@ flag_anchored = false
 # - this is the layer you're meant to tune per keybind, not
 # herdr-plugin.toml itself.
 #
+# `grab_cycle` (per keybind) restricts which grab profiles Ctrl-G
+# cycles through - only the listed names stay in the cycle, order
+# preserved, unknown names dropped (an all-unknown list falls back to
+# the full cycle). Omit to cycle through every grab profile; `grab`
+# picks where the cycle starts. Example - a deep-scrollback keybind
+# that only alternates between its two scopes:
+#   [profiles.secrets]
+#   grab = "deep"
+#   grab_cycle = ["deep", "full"]
+#
+# A picker that opens with ZERO matches stays open now (instead of
+# closing immediately): it shows the active grab profile and the
+# Ctrl-G hint, so you can re-capture with another scope without
+# relaunching.
+#
 # "open", "tab", "url", and "url-tab" already work with zero config
 # here (built-in defaults matching the shipped zextract-open/-tab/-url/
 # -url-tab actions) - only add a block below to override one.

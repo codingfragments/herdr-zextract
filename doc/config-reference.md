@@ -283,6 +283,13 @@ profile name gets selected by a keybind.
 | `patterns` | Allowlist of type tags (built-in or custom) to extract at all for this profile, overriding `[patterns].disable` entirely. Omit for no restriction (the config's own `disable` list still applies). |
 | `type_filter` | Type tags to pre-fill the picker's query with as `#tag` filters — narrows what's shown, doesn't restrict what's extracted (unlike `patterns`). |
 | `preview` | Force the preview pane open/closed for this keybind specifically, overriding `[ui].preview`'s default. One of `on`, `off`, `always`, `never`. Omit to use the `[ui]` default. |
+| `grab_cycle` | Restrict which grab profiles `Ctrl-G` cycles through for this keybind: a list of grab-profile names (`quick`, `deep`, `viewport`, `full`, `tab-scan`, or any `[grab_profiles.<name>]` definition). Only the listed names stay in the cycle, order preserved, unknown names dropped; an all-unknown list falls back to the full cycle. Omit (default) to cycle through every configured grab profile. `grab` picks where the cycle starts — if `grab` names a profile outside `grab_cycle`, the cycle starts at the list's head. |
+
+**Zero findings:** a picker that opens with no matches no longer closes
+— it stays open showing the active grab profile and a `Ctrl-G` hint
+(`No matches under grab:quick (150) / Ctrl-G cycles grab profiles ·
+Esc closes`), so cycling into another scope (or checking the query
+pre-fill) never requires relaunching.
 
 **Built-in profiles:** `open`, `tab`, `url`, and `url-tab` have
 built-in Rust-side defaults matching the four actions

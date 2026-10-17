@@ -78,8 +78,8 @@ fn run() -> Result<(), String> {
     config.log(
         config::LogLevel::Debug,
         &format!(
-            "profile {profile_name:?}: grab={initial_grab_name:?} patterns={:?}",
-            profile.patterns
+            "profile {profile_name:?}: grab={initial_grab_name:?} grab_cycle={:?} patterns={:?}",
+            profile.grab_cycle, profile.patterns
         ),
     );
 
@@ -99,9 +99,12 @@ fn run() -> Result<(), String> {
         &raw_disabled,
         allowed.as_ref(),
         &initial_grab_name,
-        socket_path.clone(),
-        ctx.focused_pane_id.clone(),
-        ctx.tab_id.clone(),
+        profile.grab_cycle.as_deref(),
+        grab::GrabTarget {
+            socket_path,
+            focused_pane_id: ctx.focused_pane_id.clone(),
+            tab_id: ctx.tab_id.clone(),
+        },
     );
     let grab::CaptureResult {
         matches,
@@ -109,10 +112,10 @@ fn run() -> Result<(), String> {
     } = grab_cycler
         .capture_current()
         .map_err(|e| format!("grab failed: {e}"))?;
-    if matches.is_empty() {
-        println!("--- no matches found ---");
-        return Ok(());
-    }
+    // An empty result is NOT a reason to skip the picker: the popup
+    // stays open so the user can Ctrl-G into another grab profile (or
+    // check the query pre-fill) instead of watching it flash shut.
+    // State::new seeds a footer hint when `matches` is empty.
 
     let custom_tags: Vec<String> = config.custom.iter().map(|cp| cp.name.clone()).collect();
     let initial_query = profile
