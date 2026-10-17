@@ -5,6 +5,23 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-10-16
+
+### Added
+
+- A picker opened with **zero findings stays open** instead of
+  closing immediately: the list shows the active grab profile and a
+  `Ctrl-G` hint (`No matches under grab:quick (150) / Ctrl-G cycles
+  grab profiles · Esc closes`), and the footer carries the same
+  message on open — so cycling into another grab scope (or checking
+  the query pre-fill) never requires relaunching. A failed capture
+  (socket error) still exits.
+- `[profiles.<name>].grab_cycle = ["deep", "full"]` — restrict which
+  grab profiles `Ctrl-G` cycles through for that keybind. Listed
+  order preserved, unknown names dropped, an all-unknown list falls
+  back to the full cycle. `grab` picks where the cycle starts; a
+  `grab` outside the list starts at its head.
+
 ## [0.5.0] - 2026-10-16
 
 ### Added
