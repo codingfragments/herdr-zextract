@@ -44,7 +44,7 @@
 
 [patterns]
 # Built-in type tags or custom pattern names to skip entirely.
-# Built-in tags: url, file, diag, git, sha, ipv4, ipv6, uuid, quote, cmd, secret
+# Built-in tags: url, file, diag, git, sha, ipv4, ipv6, uuid, quote, cmd, secret, block
 # disable = ["ipv6"]
 
 [patterns.secret]
@@ -151,16 +151,35 @@ flag_anchored = false
 
 # Named grab-profile *definitions* - what "quick"/"deep"/etc. actually
 # mean (source + line cap), as opposed to [profiles.*] above (which
-# only ever *selects* a grab profile by name). Built-in defaults for
-# quick/deep/viewport/full/tab-scan work with zero config here; add a
-# block only to override one, or define a wholly new name.
+# only ever *selects* a grab profile by name). The five built-ins
+# below work with zero config; a [grab_profiles.<name>] block overrides
+# the same-named built-in *field-wise* - unset fields keep the
+# built-in's value (unlike [profiles.*] blocks, which replace entirely).
+#
+# The built-in five with their shipped defaults, all commented out -
+# uncomment a field to change it:
+#
+# [grab_profiles.quick]
+# source = "scrollback"   # scrollback | viewport | tab
+# lines = 150             # last 150 lines of the focused pane
 #
 # [grab_profiles.deep]
-# source = "scrollback"   # scrollback | viewport | tab
-# lines = 3000             # override the built-in 1500
+# source = "scrollback"
+# lines = 1500
+#
+# [grab_profiles.viewport]
+# source = "viewport"     # the visible screen only - `lines` has no
+#                         # meaning for a viewport capture, stays unset
+#
+# [grab_profiles.full]
+# source = "scrollback"  # no `lines` key = unbounded: the whole
+#                         # scrollback
 #
 # [grab_profiles.tab-scan]
-# disable = ["secret", "ipv6"]   # skip these only while this profile is active
+# source = "tab"          # every pane on the current tab, last-focused
+# lines = 150             # per pane
+# disable = []            # type tags to skip only while this profile
+#                         # is active (built-in: none)
 #
 # A wholly custom grab profile - any name not in the built-in five
 # (quick/deep/viewport/full/tab-scan) works the same way, selected by
@@ -298,7 +317,7 @@ flag_anchored = false
 
 # [types.<tag>] — per-type verb allow-list/default override. <tag> is a
 # built-in type tag (url, file, diag, git, sha, ipv4, ipv6, uuid, quote,
-# cmd, secret) or a custom pattern's configured name. `copy-raw`/`json`
+# cmd, secret, block) or a custom pattern's configured name. `copy-raw`/`json`
 # are always allowed for every type regardless of `actions`; `open`/
 # `edit`/`reveal` are always denied for `secret` regardless of config.
 # Verb names: copy-raw, copy-display, insert, insert-display, open,
