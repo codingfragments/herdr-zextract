@@ -1,4 +1,4 @@
-# herdr-zextract — Claude Code conventions
+# herdr-zextract — agent conventions (Claude Code, pi, …)
 
 Mirrors the gitflow used in the original `zellij-zextract` / `zellij-flash`
 repos, adapted for this port's binary-release model.
@@ -24,9 +24,13 @@ repos, adapted for this port's binary-release model.
   for "push" / "looks good".
 - End each phase with: what to test, how to trigger it, what works vs
   what's still a stub.
-- Current phase: PLANNING.md's open questions (§12) are resolved —
-  implementation branches now follow the phase sequence in PLANNING.md
-  §11 Implementation phases, one `phase/` branch/PR per phase, in order.
+- **Current work: [rex-migration.md](rex-migration.md)** — make this one
+  binary serve both Herdr and Rex (Host trait, Rex backend, Lua launcher,
+  mise distribution). Read it first, work its phases in order (one
+  `phase/rex-N-…` branch/PR each), and update its Status lines, checkboxes
+  and spike table as you go. Herdr behavior must not regress.
+- PLANNING.md §11 phases (the original herdr port) are complete; PLANNING.md
+  remains the design reference for matchers, picker and config.
 
 ## Release process
 
