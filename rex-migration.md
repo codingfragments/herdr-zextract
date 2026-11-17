@@ -64,6 +64,38 @@ today; Rex gets a thin Lua launcher.
 
 `socket_client.rs` stays as-is but becomes private to `HerdrHost`.
 
+## Built to move into `muxhost` later
+
+The sister repo `herdr-flash` (see its `rex-migration.md`) will, after
+this plan's Phase 3–4 work live, **extract `src/host/` into a shared
+crate `codingfragments/muxhost`** that zextract, flash and later nav all
+depend on. Nothing here waits for that, but build `src/host/` so the move
+is a copy, not a rewrite:
+
+- **Self-contained module:** `src/host/` may use only `std`,
+  `serde`/`serde_json` and (for the clipboard helper) `arboard`. Nothing
+  from the rest of the crate: no `crate::config`, `crate::matcher`,
+  `crate::actions`, no zextract types in signatures. Errors are `String`
+  (or one small `host::Error`), and the module doesn't log.
+- **Generic env names, tool prefix passed in:**
+  `host::detect("ZEXTRACT")` reads `{PREFIX}_HOST`,
+  `{PREFIX}_SOURCE_BLOCK` and `{PREFIX}_SOURCE_WINDOW`, so flash can call
+  `detect("FLASH")` with the same code. Shared names stay unprefixed:
+  `REX_CLI`, `REX_SESSION`, `HERDR_*`.
+- **Leave room for flash's needs:** flash also needs colored reads
+  (herdr `format=ansi`, Rex `--format=vt`) and optional scroll info.
+  - Give `read_pane` a `ReadFormat` parameter (`Plain` now, `Ansi`
+    added later), or mark the enums `#[non_exhaustive]`.
+  - Any optional capability is a trait method with a default
+    implementation (e.g. `scroll_info() -> Ok(None)`), so adding one
+    later doesn't break existing implementations.
+- **Put the clipboard in the module too:** the arboard + OSC 52 fallback
+  from Phase 3 goes in `src/host/clipboard.rs`, because flash copies text
+  as well.
+- **Tests move with it:** host tests and the fake host live under
+  `src/host/` (unit tests) and `tests/fixtures/rex/`, so they can be
+  copied over as they are.
+
 ## Phases
 
 ### Phase 1 — `Host` trait + `HerdrHost` (pure refactor) — `phase/rex-1-host-trait`
@@ -86,7 +118,7 @@ Status: ☐ not started
 - [ ] `grab.rs` / `GrabCycler` / `GrabTarget` take `&dyn Host` (or
   `Box<dyn Host>`) instead of `socket_path` + ids. `actions::dispatch`
   gets the host for Insert.
-- [ ] `main.rs`: `host::detect()` → `HerdrHost` (only backend so far).
+- [ ] `main.rs`: `host::detect("ZEXTRACT")` → `HerdrHost` (only backend so far).
 - [ ] No behavior change; `cargo test`, `just check` green; existing grab
   tests ported to a `FakeHost` (makes grab logic unit-testable without a
   socket — a nice side win).
@@ -123,7 +155,7 @@ Status: ☐ not started
     floating-layer blocks** (the popup itself), focused/source first.
     Title: block label → terminal title (`block call … title`) → id.
   - `insert_text`: `send -b B -- TEXT`.
-- [ ] `host::detect()`:
+- [ ] `host::detect("ZEXTRACT")` (prefix param, see "Built to move into `muxhost`"):
   `ZEXTRACT_HOST=rex|herdr` wins; else `HERDR_SOCKET_PATH` → herdr;
   else `REX_SESSION` → rex; else a clear error listing both.
 - [ ] Source must come from `ZEXTRACT_SOURCE_BLOCK` (required under
@@ -238,6 +270,9 @@ Status: ☐ not started
 ## Out of scope
 
 - Windows, Intel-mac release binaries (unchanged policy).
-- Porting `herdr-flash` / `herdr-nav` — they should follow the same
-  `Host`-trait pattern afterwards; lessons from this plan go into their
-  own plans.
+- Porting `herdr-flash` / `herdr-nav`: flash has its own plan
+  (`../herdr-flash/rex-migration.md`). That plan creates `muxhost` from
+  this repo's `src/host/` and then opens a PR here to switch zextract to
+  the crate. Nav follows afterwards with its own plan.
+- Creating the `muxhost` crate itself: that belongs to flash's Phase 1,
+  not to this plan.
