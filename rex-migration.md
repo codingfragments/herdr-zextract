@@ -284,6 +284,21 @@ Status: ☑ done (PR #42, live in the user's Rex config)
 - Spike S2 (OSC 52 through a Rex layer) still open: on the dev Mac the
   system clipboard answers first, so the fallback path isn't exercised;
   matters only for remote/headless hosts.
+- **S1 refinement (2026-11, reported live):** headless, the server
+  restores focus to the source pane after the layer closes — but with
+  the app attached, focus can land on the **last pane of the tab**
+  instead. Workaround in the launcher (`rex/zextract.lua`): a one-shot
+  watcher (detached `rex do -e` via `rex.exec` + `nohup … &`) listens
+  for the popup's `block_closed` and re-focuses the source pane
+  (guarded: only while the source window is still the session's active
+  window). Notes from building it:
+  - `rex.on` in **config** Lua does nothing on rex 0.1.0-preview.19
+    (the server warns); `rex do` scripts can hold handlers.
+  - `rex.exec.start` is not callable from config Lua (only from
+    `rex do` scripts); `rex.exec` + a self-detaching shell works.
+  - Watcher mechanics verified headless: spawns with the popup, fires
+    on close, re-focuses, exits. Worth reporting the app-side
+    focus-on-layer-close behavior to superlogical.
 - The binary is not yet mise-installed; for testing the dev build is
   symlinked to `~/.local/bin/herdr-zextract`. Phase 5 replaces that
   with the real mise install.
