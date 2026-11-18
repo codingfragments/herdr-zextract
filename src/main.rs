@@ -1,58 +1,18 @@
 mod actions;
 mod config;
 mod grab;
+mod host;
 mod matcher;
 mod picker;
-mod socket_client;
 
-/// Launch context: which pane/tab this popup was opened relative to.
-struct LaunchContext {
-    focused_pane_id: String,
-    /// Empty when launched via the `HERDR_ACTIVE_PANE_ID` dev-testing
-    /// fallback (no real tab context) - `tab-scan` degrades to finding
-    /// zero panes in that case, which is fine for a manual dev keybind.
-    tab_id: String,
-}
+use std::rc::Rc;
 
-/// Reads the launch context from either path: a real plugin-pane
-/// invocation sets `HERDR_PLUGIN_CONTEXT_JSON`; a `[[keys.command]]`
-/// custom-command popup (used for manual dev-testing ahead of a real
-/// plugin keybind) sets `HERDR_ACTIVE_PANE_ID` directly.
-fn launch_context() -> Result<LaunchContext, String> {
-    if let Ok(context_json) = std::env::var("HERDR_PLUGIN_CONTEXT_JSON") {
-        let context: serde_json::Value = serde_json::from_str(&context_json)
-            .map_err(|e| format!("invalid context JSON: {e}"))?;
-        let focused_pane_id = context
-            .get("focused_pane_id")
-            .and_then(|v| v.as_str())
-            .ok_or(
-                "context JSON has no focused_pane_id (nothing was focused before this popup opened)",
-            )?
-            .to_string();
-        let tab_id = context
-            .get("tab_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        return Ok(LaunchContext {
-            focused_pane_id,
-            tab_id,
-        });
-    }
-    let focused_pane_id = std::env::var("HERDR_ACTIVE_PANE_ID").map_err(|_| {
-        "neither HERDR_PLUGIN_CONTEXT_JSON nor HERDR_ACTIVE_PANE_ID is set".to_string()
-    })?;
-    Ok(LaunchContext {
-        focused_pane_id,
-        tab_id: String::new(),
-    })
-}
+/// Env prefix for this tool's host settings (`ZEXTRACT_HOST`, …), see
+/// [`host::detect`].
+const ENV_PREFIX: &str = "ZEXTRACT";
 
 fn run() -> Result<(), String> {
-    let ctx = launch_context()?;
-
-    let socket_path = std::env::var("HERDR_SOCKET_PATH")
-        .map_err(|_| "HERDR_SOCKET_PATH is not set".to_string())?;
+    let host: Rc<dyn host::Host> = Rc::from(host::detect(ENV_PREFIX)?);
 
     let config_missing = config::is_missing();
     let config = config::Config::load();
@@ -61,6 +21,16 @@ fn run() -> Result<(), String> {
     // the Ctrl-G cycle merges its own `disable` list into (see
     // `GrabCycler::new`).
     let raw_disabled = config.disabled.clone();
+
+    config.log(
+        config::LogLevel::Debug,
+        &format!(
+            "host {}: source pane={:?} tab={:?}",
+            host.name(),
+            host.source().pane_id,
+            host.source().tab_id
+        ),
+    );
 
     // Per-keybind override: which named profile (grab scope, pattern
     // allowlist, query pre-fill) to use. The launcher action in
@@ -100,11 +70,7 @@ fn run() -> Result<(), String> {
         allowed.as_ref(),
         &initial_grab_name,
         profile.grab_cycle.as_deref(),
-        grab::GrabTarget {
-            socket_path,
-            focused_pane_id: ctx.focused_pane_id.clone(),
-            tab_id: ctx.tab_id.clone(),
-        },
+        Rc::clone(&host),
     );
     let grab::CaptureResult {
         matches,
@@ -143,10 +109,9 @@ fn run() -> Result<(), String> {
     match selection {
         picker::PickerResult::Selected(matches, verb) => {
             let refs: Vec<&matcher::Match> = matches.iter().collect();
-            // Insert always targets the pane the plugin was launched
-            // from, regardless of which pane a multi-pane match came
-            // from - ctx.focused_pane_id, not any per-match pane id.
-            match actions::execute_batch(verb, &refs, &ctx.focused_pane_id, &config) {
+            // Insert always targets the host's source pane, regardless
+            // of which pane a multi-pane match came from.
+            match actions::execute_batch(verb, &refs, host.as_ref(), &config) {
                 actions::Outcome::Done(msg) => println!("{msg}"),
                 actions::Outcome::Failed(msg) => println!("error: {msg}"),
             }

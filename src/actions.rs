@@ -23,6 +23,7 @@
 use std::process::Command;
 
 use crate::config::Config;
+use crate::host::Host;
 use crate::matcher::{Match, MatchType};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -243,9 +244,9 @@ pub enum Outcome {
     Failed(String),
 }
 
-/// Run `verb` against `m`. `source_pane_id` is required for
-/// insert/insert-display, sent back to that pane over `pane.send_text`.
-pub fn dispatch(verb: Verb, m: &Match, source_pane_id: &str, config: &Config) -> Outcome {
+/// Run `verb` against `m`. Insert/insert-display type the text back
+/// into the host's source pane (the one the tool was launched from).
+pub fn dispatch(verb: Verb, m: &Match, host: &dyn Host, config: &Config) -> Outcome {
     if !is_verb_allowed(m, verb, config) {
         return Outcome::Failed(format!(
             "'{}' not available for [{}]",
@@ -256,8 +257,8 @@ pub fn dispatch(verb: Verb, m: &Match, source_pane_id: &str, config: &Config) ->
     match verb {
         Verb::CopyRaw => copy_to_clipboard(&m.raw),
         Verb::CopyDisplay => copy_to_clipboard(&m.display),
-        Verb::Insert => insert_text(&m.raw, source_pane_id),
-        Verb::InsertDisplay => insert_text(&m.display, source_pane_id),
+        Verb::Insert => insert_text(&m.raw, host),
+        Verb::InsertDisplay => insert_text(&m.display, host),
         Verb::Open => run_open(m, config),
         Verb::Edit => run_edit(m, config),
         Verb::Reveal => run_reveal(m, config),
@@ -298,12 +299,7 @@ pub fn plan_batch(verb: Verb, matches: &[&Match], config: &Config) -> Result<(),
 /// types just copies the ones that allow copy). A single allowed
 /// target delegates to [`dispatch`] (preserves per-row semantics like
 /// edit's `+line`); multiple targets join/batch per verb.
-pub fn execute_batch(
-    verb: Verb,
-    matches: &[&Match],
-    source_pane_id: &str,
-    config: &Config,
-) -> Outcome {
+pub fn execute_batch(verb: Verb, matches: &[&Match], host: &dyn Host, config: &Config) -> Outcome {
     let allowed: Vec<&Match> = matches
         .iter()
         .copied()
@@ -313,13 +309,13 @@ pub fn execute_batch(
         return Outcome::Failed(format!("'{}' not available for selection", verb.label()));
     }
     if allowed.len() == 1 {
-        return dispatch(verb, allowed[0], source_pane_id, config);
+        return dispatch(verb, allowed[0], host, config);
     }
     match verb {
         Verb::CopyRaw => copy_to_clipboard(&join(&allowed, |m| &m.raw, "\n")),
         Verb::CopyDisplay => copy_to_clipboard(&join(&allowed, |m| &m.display, "\n")),
-        Verb::Insert => insert_text(&join(&allowed, |m| &m.raw, " "), source_pane_id),
-        Verb::InsertDisplay => insert_text(&join(&allowed, |m| &m.display, " "), source_pane_id),
+        Verb::Insert => insert_text(&join(&allowed, |m| &m.raw, " "), host),
+        Verb::InsertDisplay => insert_text(&join(&allowed, |m| &m.display, " "), host),
         Verb::Open => {
             let ok = allowed
                 .iter()
@@ -354,17 +350,12 @@ fn copy_to_clipboard(text: &str) -> Outcome {
     }
 }
 
-fn insert_text(text: &str, source_pane_id: &str) -> Outcome {
-    let socket_path = match std::env::var("HERDR_SOCKET_PATH") {
-        Ok(p) => p,
-        Err(_) => return Outcome::Failed("HERDR_SOCKET_PATH is not set".to_string()),
-    };
-    match crate::socket_client::request(
-        &socket_path,
-        "pane.send_text",
-        serde_json::json!({"pane_id": source_pane_id, "text": text}),
-    ) {
-        Ok(_) => Outcome::Done(format!("inserted into {source_pane_id}: {text}")),
+/// Insert always targets the pane the tool was launched from,
+/// regardless of which pane a multi-pane match came from.
+fn insert_text(text: &str, host: &dyn Host) -> Outcome {
+    let pane_id = &host.source().pane_id;
+    match host.insert_text(pane_id, text) {
+        Ok(()) => Outcome::Done(format!("inserted into {pane_id}: {text}")),
         Err(e) => Outcome::Failed(format!("insert failed: {e}")),
     }
 }
@@ -619,6 +610,47 @@ mod tests {
             context: raw.to_string(),
             span: (0, raw.len()),
             fields: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn insert_types_into_the_hosts_source_pane() {
+        let host = crate::host::fake::FakeHost::new("w1:p2", "w1:t1");
+        let url = m(MatchType::Url, "https://example.com");
+        match dispatch(Verb::Insert, &url, &host, &Config::default()) {
+            Outcome::Done(msg) => assert_eq!(msg, "inserted into w1:p2: https://example.com"),
+            Outcome::Failed(msg) => panic!("insert failed: {msg}"),
+        }
+        assert_eq!(
+            host.inserts.borrow().as_slice(),
+            &[("w1:p2".to_string(), "https://example.com".to_string())]
+        );
+    }
+
+    #[test]
+    fn batch_insert_joins_with_spaces_into_one_insert() {
+        let host = crate::host::fake::FakeHost::new("p1", "t1");
+        let a = m(MatchType::Uuid, "a");
+        let b = m(MatchType::Uuid, "b");
+        let refs = vec![&a, &b];
+        assert!(matches!(
+            execute_batch(Verb::Insert, &refs, &host, &Config::default()),
+            Outcome::Done(_)
+        ));
+        assert_eq!(
+            host.inserts.borrow().as_slice(),
+            &[("p1".to_string(), "a b".to_string())]
+        );
+    }
+
+    #[test]
+    fn insert_failure_is_reported() {
+        let mut host = crate::host::fake::FakeHost::new("p1", "t1");
+        host.insert_error = Some("herdr socket error: gone".into());
+        let url = m(MatchType::Url, "https://example.com");
+        match dispatch(Verb::Insert, &url, &host, &Config::default()) {
+            Outcome::Failed(msg) => assert_eq!(msg, "insert failed: herdr socket error: gone"),
+            Outcome::Done(msg) => panic!("expected failure, got: {msg}"),
         }
     }
 

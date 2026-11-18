@@ -18,13 +18,13 @@ use serde_json::Value;
 /// handful of milliseconds). This function is now the *only* way
 /// anything in the plugin talks to the socket, so the bug class can't
 /// recur by construction - there is no persistent-connection API left
-/// to accidentally reuse.
+/// to accidentally reuse. Private to [`super::herdr`].
 pub fn request(socket_path: &str, method: &str, params: Value) -> std::io::Result<Value> {
     let stream = UnixStream::connect(socket_path)?;
     let mut reader = BufReader::new(stream);
 
     let req = serde_json::json!({
-        "id": format!("herdr-zextract-{method}"),
+        "id": format!("{}-{method}", env!("CARGO_PKG_NAME")),
         "method": method,
         "params": params,
     });
