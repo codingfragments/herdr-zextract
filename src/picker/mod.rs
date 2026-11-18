@@ -1405,7 +1405,7 @@ mod grab_label_tests {
             None,
             initial_grab_name,
             None,
-            std::rc::Rc::new(crate::host::fake::FakeHost::new("pane1", "tab1")),
+            std::rc::Rc::new(muxhost::fake::FakeHost::new("pane1", "tab1")),
         );
         State::new(LaunchArgs {
             matches: Vec::new(),
@@ -1476,7 +1476,7 @@ mod freshness_tests {
             None,
             "quick",
             None,
-            std::rc::Rc::new(crate::host::fake::FakeHost::new("pane1", "tab1")),
+            std::rc::Rc::new(muxhost::fake::FakeHost::new("pane1", "tab1")),
         );
         State::new(LaunchArgs {
             matches,

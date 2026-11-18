@@ -3,7 +3,7 @@
 //! `source = "tab"` variant. See `doc/multi-pane-grab.md` for the full
 //! design-decisions table this follows.
 //!
-//! All multiplexer access goes through [`crate::host::Host`]: which
+//! All multiplexer access goes through [`muxhost::Host`]: which
 //! panes count as "on the tab" (and that floating/popup panes are left
 //! out) is the host's business, not this module's.
 
@@ -11,8 +11,8 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use crate::config::Config;
-use crate::host::{Host, ReadSource};
 use crate::matcher::{self, Match};
+use muxhost::{Host, ReadFormat, ReadSource};
 
 /// The five grab profiles with built-in Rust-side definitions, in the
 /// fixed order [`Config::cycle_grab_profile_names`] and [`GrabCycler`]
@@ -253,7 +253,7 @@ pub fn capture(profile: &ResolvedGrabProfile, host: &dyn Host) -> Result<Vec<Pan
             } else {
                 ReadSource::Scrollback
             };
-            let text = host.read_pane(source_pane, source, profile.lines)?;
+            let text = host.read_pane(source_pane, source, ReadFormat::Plain, profile.lines)?;
             Ok(vec![PaneCapture {
                 pane_id: source_pane.clone(),
                 title: String::new(),
@@ -269,7 +269,12 @@ pub fn capture(profile: &ResolvedGrabProfile, host: &dyn Host) -> Result<Vec<Pan
 fn capture_tab(host: &dyn Host, lines: Option<u32>) -> Result<Vec<PaneCapture>, String> {
     let mut out = Vec::new();
     for pane in host.list_tab_panes()? {
-        let Ok(text) = host.read_pane(&pane.pane_id, ReadSource::Scrollback, lines) else {
+        let Ok(text) = host.read_pane(
+            &pane.pane_id,
+            ReadSource::Scrollback,
+            ReadFormat::Plain,
+            lines,
+        ) else {
             continue;
         };
         out.push(PaneCapture {
@@ -285,7 +290,7 @@ fn capture_tab(host: &dyn Host, lines: Option<u32>) -> Result<Vec<PaneCapture>, 
 mod tests {
     use super::*;
 
-    use crate::host::fake::{FakeHost, ReadCall};
+    use muxhost::fake::{FakeHost, ReadCall};
 
     fn target() -> Rc<dyn Host> {
         Rc::new(FakeHost::new("pane1", "tab1"))
@@ -454,7 +459,7 @@ mod tests {
             .with_pane("p2", "editor", "two")
             .with_pane("p1", "shell", "one");
         // Listed on the tab but unreadable (closed mid-grab).
-        host.tab.push(crate::host::PaneInfo {
+        host.tab.push(muxhost::PaneInfo {
             pane_id: "p3".into(),
             title: "gone".into(),
         });

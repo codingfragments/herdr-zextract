@@ -1,15 +1,21 @@
 mod actions;
 mod config;
 mod grab;
-mod host;
 mod matcher;
 mod picker;
+
+use muxhost as host;
 
 use std::rc::Rc;
 
 /// Env prefix for this tool's host settings (`ZEXTRACT_HOST`, …), see
 /// [`host::detect`].
 const ENV_PREFIX: &str = "ZEXTRACT";
+
+/// Version of the host/launcher interface this binary offers, printed
+/// by `--host-api` (launchers check it; bump when the Rex launcher
+/// starts relying on something new).
+pub const HOST_API: u32 = 1;
 
 fn run() -> Result<(), String> {
     let host: Rc<dyn host::Host> = Rc::from(host::detect(ENV_PREFIX)?);
@@ -130,7 +136,7 @@ fn main() {
             return;
         }
         Some("--host-api") => {
-            println!("{}", host::HOST_API);
+            println!("{}", HOST_API);
             return;
         }
         _ => {}
