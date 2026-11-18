@@ -15,7 +15,7 @@ fn run() -> Result<(), String> {
     let host: Rc<dyn host::Host> = Rc::from(host::detect(ENV_PREFIX)?);
 
     let config_missing = config::is_missing();
-    let config = config::Config::load();
+    let config = config::Config::load(host.name());
     // [patterns].disable before any grab-profile-specific or
     // launch-allowlist adjustment - the fixed baseline every grabber in
     // the Ctrl-G cycle merges its own `disable` list into (see

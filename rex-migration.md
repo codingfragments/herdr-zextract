@@ -1,6 +1,6 @@
 # Rex migration plan — one binary, two hosts
 
-> **Status: Phase 1 implemented (PR pending); Phase 2 next.** This is the active plan for this repo.
+> **Status: Phases 1–2 done (Phase 2 PR pending); Phase 3 next.** This is the active plan for this repo.
 > Agents: read this file before starting work, follow the phases in order
 > (one `phase/rex-N-…` branch + PR per phase, see CLAUDE.md gitflow), and
 > tick the checkboxes / update the "Status" lines as phases land.
@@ -100,7 +100,7 @@ is a copy, not a rewrite:
 
 ### Phase 1 — `Host` trait + `HerdrHost` (pure refactor) — `phase/rex-1-host-trait`
 
-Status: ☑ implemented on `phase/rex-1-host-trait` (PR pending)
+Status: ☑ done (PR #38)
 
 - [x] New `src/host/mod.rs`: `Host` trait (`name`, `source`, `read_pane`,
   `list_tab_panes`, `insert_text`), `SourceRef { pane_id, tab_id }`,
@@ -132,20 +132,33 @@ Status: ☑ implemented on `phase/rex-1-host-trait` (PR pending)
 
 ### Phase 2 — neutral config location — `phase/rex-2-config-path`
 
-Status: ☐ not started
+Status: ☑ implemented on `phase/rex-2-config-path` (PR pending)
 
-- [ ] Config lookup order:
-  1. `$ZEXTRACT_CONFIG` (explicit file)
-  2. `$XDG_CONFIG_HOME/zextract/config.toml` → `~/.config/zextract/config.toml`
+- [x] Config lookup order (`config::locate`, pure and unit-tested; first
+  existing file wins):
+  1. `$ZEXTRACT_CONFIG` (explicit file; when set, no fallback)
+  2. `$XDG_CONFIG_HOME/zextract/config.toml` (absolute only, per XDG) →
+     `~/.config/zextract/config.toml`
   3. `$HERDR_PLUGIN_CONFIG_DIR/config.toml` (legacy, herdr only)
-- [ ] `Ctrl-W` "write starter config" writes to (2) unless only (3) is
-  set *and* exists as the user's established location — keep it simple:
-  write to (2), mention legacy path in the banner if it's in use.
-- [ ] Optional host-scoped overrides: `[host.rex]` / `[host.herdr]`
-  tables merged over the root (start with `[host.*.ui]` and
-  `[host.*.actions]` only — YAGNI the rest).
-- [ ] Docs: `doc/config-reference.md`, `README.md`, `config.example.toml`
-  header.
+- [x] `Ctrl-W` writes to (1) if set, else (2). The config-missing banner
+  now shows whenever no file exists anywhere (previously only when
+  `HERDR_PLUGIN_CONFIG_DIR` was set). No banner note for the legacy
+  path: when the legacy file is in use the config isn't missing, so the
+  banner never shows; the docs cover moving it instead.
+- [x] Host-scoped overrides: `[host.<name>]` with `ui` and `actions`
+  only, deep-merged over the root at the TOML level before
+  deserializing (`apply_host_overrides`); other sections under
+  `[host.<name>]` are ignored with a `log_level = warn` message.
+  `Config::load(host.name())`; parsing split into
+  `Config::from_toml_str(text, host)` for tests.
+- [x] Docs: `doc/config-reference.md` (lookup order + new
+  `[host.<name>]` section), `doc/env-vars.md` (`ZEXTRACT_CONFIG`,
+  `ZEXTRACT_HOST`), `README.md`, `config.example.toml` header.
+- [x] `just check` green (307 tests).
+- **Note for Rex (Phase 4 docs):** `HERDR_PLUGIN_CONFIG_DIR` is not set
+  under Rex, so a config that only exists at the legacy herdr location
+  is invisible there. Move it to `~/.config/zextract/config.toml` (herdr
+  keeps finding it there too).
 
 ### Phase 3 — `RexHost` + host detection — `phase/rex-3-rex-host`
 

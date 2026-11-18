@@ -1,5 +1,9 @@
-//! User config, loaded once at startup from
-//! `$HERDR_PLUGIN_CONFIG_DIR/config.toml`. Ports the built-in-tuning and
+//! User config, loaded once at startup from the first config file that
+//! exists (see [`locate`]): `$ZEXTRACT_CONFIG`, else
+//! `$XDG_CONFIG_HOME/zextract/config.toml` (`~/.config/zextract/config.toml`),
+//! else the legacy herdr location `$HERDR_PLUGIN_CONFIG_DIR/config.toml`.
+//! Optional `[host.<name>]` tables override `[ui]`/`[actions]` for one
+//! multiplexer host (see [`apply_host_overrides`]). Ports the built-in-tuning and
 //! custom-pattern surface of the original plugin's `doc/config-reference.md`
 //! `patterns { }` block.
 //!
@@ -613,41 +617,22 @@ impl Config {
         names
     }
 
-    /// Load from `$HERDR_PLUGIN_CONFIG_DIR/config.toml`. Missing file,
-    /// unset env var, or a parse error all fall back to
-    /// `Config::default()` (all built-ins on, no custom patterns) - a
-    /// broken config must never crash the plugin. Parse errors are
-    /// reported on stderr so they're visible without blocking startup.
-    pub fn load() -> Self {
-        let Ok(dir) = std::env::var("HERDR_PLUGIN_CONFIG_DIR") else {
+    /// Load the config file [`locate`] finds, with `host`'s
+    /// `[host.<host>]` overrides applied (`host` is the multiplexer the
+    /// tool runs under, e.g. `"herdr"` or `"rex"`). No file, an unreadable
+    /// file or a parse error all fall back to `Config::default()` (all
+    /// built-ins on, no custom patterns) - a broken config must never
+    /// crash the plugin. Parse errors are reported on stderr so they're
+    /// visible without blocking startup.
+    pub fn load(host: &str) -> Self {
+        let Some(path) = location().path else {
             return Self::default();
         };
-        let path = std::path::Path::new(&dir).join("config.toml");
         let Ok(text) = std::fs::read_to_string(&path) else {
             return Self::default();
         };
-        match toml::from_str::<RawConfig>(&text) {
-            Ok(raw) => Self {
-                log_level: raw.log_level,
-                disabled: raw.patterns.disable.into_iter().collect(),
-                secret_entropy_filter: raw.patterns.secret.entropy_filter,
-                command_flag_anchored: raw.patterns.command.flag_anchored,
-                command_triggers: resolve_triggers(
-                    &raw.patterns.command.triggers,
-                    &raw.patterns.command.triggers_ignore,
-                ),
-                command_prompt_markers: resolve_prompt_markers(
-                    &raw.patterns.command.prompt_markers,
-                ),
-                custom: raw.patterns.custom,
-                profiles: raw.profiles,
-                grab_profiles: raw.grab_profiles,
-                ui: raw.ui,
-                colors: raw.colors,
-                types: raw.types,
-                actions: raw.actions,
-                limits: raw.limits,
-            },
+        match Self::from_toml_str(&text, host) {
+            Ok(config) => config,
             Err(e) => {
                 // log_level can't be consulted here - it lives in the
                 // very file that just failed to parse - so this always
@@ -657,29 +642,202 @@ impl Config {
             }
         }
     }
+
+    /// Parse config TOML, applying `[host.<host>]` overrides. Warnings
+    /// about ignored override keys go through [`Config::log`].
+    pub fn from_toml_str(text: &str, host: &str) -> Result<Self, String> {
+        let table: toml::Table = toml::from_str(text).map_err(|e| e.to_string())?;
+        let (table, warnings) = apply_host_overrides(table, host);
+        let raw: RawConfig = toml::Value::Table(table)
+            .try_into()
+            .map_err(|e: toml::de::Error| e.to_string())?;
+        let config = Self {
+            log_level: raw.log_level,
+            disabled: raw.patterns.disable.into_iter().collect(),
+            secret_entropy_filter: raw.patterns.secret.entropy_filter,
+            command_flag_anchored: raw.patterns.command.flag_anchored,
+            command_triggers: resolve_triggers(
+                &raw.patterns.command.triggers,
+                &raw.patterns.command.triggers_ignore,
+            ),
+            command_prompt_markers: resolve_prompt_markers(&raw.patterns.command.prompt_markers),
+            custom: raw.patterns.custom,
+            profiles: raw.profiles,
+            grab_profiles: raw.grab_profiles,
+            ui: raw.ui,
+            colors: raw.colors,
+            types: raw.types,
+            actions: raw.actions,
+            limits: raw.limits,
+        };
+        for w in warnings {
+            config.log(LogLevel::Warn, &w);
+        }
+        Ok(config)
+    }
 }
 
-fn config_path() -> Option<PathBuf> {
-    std::env::var("HERDR_PLUGIN_CONFIG_DIR")
-        .ok()
-        .map(|dir| Path::new(&dir).join("config.toml"))
+/// The `[host.<name>]` sections a host override may contain. Everything
+/// else under `[host.<name>]` is ignored with a warning.
+const HOST_OVERRIDE_SECTIONS: &[&str] = &["ui", "actions"];
+
+/// Take the `[host]` table out of `table` and deep-merge
+/// `[host.<host>.ui]` / `[host.<host>.actions]` over the root's `[ui]` /
+/// `[actions]` (nested tables merge key by key, any other value
+/// replaces). Other hosts' sections are dropped silently; other keys in
+/// this host's section are dropped with a warning (returned).
+fn apply_host_overrides(mut table: toml::Table, host: &str) -> (toml::Table, Vec<String>) {
+    let mut warnings = Vec::new();
+    let Some(hosts) = table.remove("host") else {
+        return (table, warnings);
+    };
+    let toml::Value::Table(mut hosts) = hosts else {
+        warnings.push("ignored `host`: expected a table like [host.rex]".to_string());
+        return (table, warnings);
+    };
+    let Some(ours) = hosts.remove(host) else {
+        return (table, warnings);
+    };
+    let toml::Value::Table(ours) = ours else {
+        warnings.push(format!("ignored `host.{host}`: expected a table"));
+        return (table, warnings);
+    };
+    for (key, value) in ours {
+        if !HOST_OVERRIDE_SECTIONS.contains(&key.as_str()) {
+            warnings.push(format!(
+                "ignored [host.{host}.{key}]: host overrides support only {}",
+                HOST_OVERRIDE_SECTIONS.join(", ")
+            ));
+            continue;
+        }
+        match table.get_mut(&key) {
+            Some(base) => merge_toml(base, value),
+            None => {
+                table.insert(key, value);
+            }
+        }
+    }
+    (table, warnings)
 }
 
-/// True only when `$HERDR_PLUGIN_CONFIG_DIR` is set but `config.toml`
-/// doesn't exist there yet - the case [`write_default`] is for. A set
-/// env var pointing at a config that exists but fails to parse is a
-/// different situation (the user has a config, just a broken one) and
-/// intentionally doesn't trigger this.
+/// Deep-merge `over` into `base`: tables merge key by key, recursively;
+/// any other value in `over` replaces the one in `base`.
+fn merge_toml(base: &mut toml::Value, over: toml::Value) {
+    match (base, over) {
+        (toml::Value::Table(base), toml::Value::Table(over)) => {
+            for (k, v) in over {
+                match base.get_mut(&k) {
+                    Some(b) => merge_toml(b, v),
+                    None => {
+                        base.insert(k, v);
+                    }
+                }
+            }
+        }
+        (base, over) => *base = over,
+    }
+}
+
+/// Where the config file is, and where `Ctrl-W` should write one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigLocation {
+    /// The config file in use, if one exists.
+    pub path: Option<PathBuf>,
+    /// Where a starter config goes when none exists: `$ZEXTRACT_CONFIG`
+    /// if set, else the neutral XDG location. `None` only when neither
+    /// it nor `HOME`/`XDG_CONFIG_HOME` is known.
+    pub write_target: Option<PathBuf>,
+}
+
+/// The environment [`locate`] works from - plain values, so the lookup
+/// rules are unit-testable without touching the process environment.
+#[derive(Debug, Clone, Default)]
+pub struct ConfigEnv {
+    /// `$ZEXTRACT_CONFIG`: an explicit config file.
+    pub explicit: Option<PathBuf>,
+    pub xdg_config_home: Option<PathBuf>,
+    pub home: Option<PathBuf>,
+    /// `$HERDR_PLUGIN_CONFIG_DIR` (legacy herdr location).
+    pub herdr_plugin_dir: Option<PathBuf>,
+}
+
+impl ConfigEnv {
+    fn from_process_env() -> Self {
+        let path_var = |name: &str| {
+            std::env::var_os(name)
+                .filter(|v| !v.is_empty())
+                .map(PathBuf::from)
+        };
+        Self {
+            explicit: path_var("ZEXTRACT_CONFIG"),
+            xdg_config_home: path_var("XDG_CONFIG_HOME"),
+            home: path_var("HOME"),
+            herdr_plugin_dir: path_var("HERDR_PLUGIN_CONFIG_DIR"),
+        }
+    }
+}
+
+/// Config lookup:
+/// 1. `explicit` (`$ZEXTRACT_CONFIG`) - used as given; no fallback, so
+///    a missing explicit file means "no config" (and `Ctrl-W` writes it).
+/// 2. `$XDG_CONFIG_HOME/zextract/config.toml` (an absolute
+///    `XDG_CONFIG_HOME` only, per the XDG spec), else
+///    `~/.config/zextract/config.toml`.
+/// 3. `$HERDR_PLUGIN_CONFIG_DIR/config.toml` (legacy, herdr only).
+///
+/// The first file that exists wins. A starter config is written to (1)
+/// if set, else (2).
+pub fn locate(env: &ConfigEnv, exists: impl Fn(&Path) -> bool) -> ConfigLocation {
+    if let Some(explicit) = &env.explicit {
+        return ConfigLocation {
+            path: exists(explicit).then(|| explicit.clone()),
+            write_target: Some(explicit.clone()),
+        };
+    }
+    let neutral = env
+        .xdg_config_home
+        .as_ref()
+        .filter(|p| p.is_absolute())
+        .map(|p| p.join("zextract/config.toml"))
+        .or_else(|| {
+            env.home
+                .as_ref()
+                .map(|h| h.join(".config/zextract/config.toml"))
+        });
+    let legacy = env.herdr_plugin_dir.as_ref().map(|d| d.join("config.toml"));
+    let path = [neutral.as_ref(), legacy.as_ref()]
+        .into_iter()
+        .flatten()
+        .find(|p| exists(p))
+        .cloned();
+    ConfigLocation {
+        path,
+        write_target: neutral.or(legacy),
+    }
+}
+
+/// [`locate`] against the real environment and filesystem.
+pub fn location() -> ConfigLocation {
+    locate(&ConfigEnv::from_process_env(), |p| p.is_file())
+}
+
+/// True when no config file exists yet (and there is somewhere to write
+/// one) - the case [`write_default`] is for. A config that exists but
+/// fails to parse is a different situation (the user has a config, just
+/// a broken one) and intentionally doesn't trigger this.
 pub fn is_missing() -> bool {
-    config_path().is_some_and(|p| !p.exists())
+    let loc = location();
+    loc.path.is_none() && loc.write_target.is_some()
 }
 
-/// Write [`DEFAULT_CONFIG_TOML`] to `$HERDR_PLUGIN_CONFIG_DIR/config.toml`,
+/// Write [`DEFAULT_CONFIG_TOML`] to [`ConfigLocation::write_target`],
 /// creating the directory if needed. Refuses to overwrite an existing
 /// file (`create_new`) - this is only ever offered when [`is_missing`]
 /// was true, but a defensive double-check costs nothing.
 pub fn write_default() -> Result<PathBuf, String> {
-    let path = config_path().ok_or("HERDR_PLUGIN_CONFIG_DIR is not set")?;
+    let path = location()
+        .write_target
+        .ok_or("cannot tell where to write a config: set HOME or ZEXTRACT_CONFIG")?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("failed to create {parent:?}: {e}"))?;
     }
@@ -695,6 +853,169 @@ pub fn write_default() -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── Config location (rex-migration Phase 2) ──────────────────────
+
+    fn env(
+        explicit: Option<&str>,
+        xdg: Option<&str>,
+        home: Option<&str>,
+        herdr: Option<&str>,
+    ) -> ConfigEnv {
+        ConfigEnv {
+            explicit: explicit.map(PathBuf::from),
+            xdg_config_home: xdg.map(PathBuf::from),
+            home: home.map(PathBuf::from),
+            herdr_plugin_dir: herdr.map(PathBuf::from),
+        }
+    }
+
+    fn existing<'a>(files: &'a [&'a str]) -> impl Fn(&Path) -> bool + 'a {
+        move |p: &Path| files.iter().any(|f| Path::new(f) == p)
+    }
+
+    #[test]
+    fn locate_prefers_the_neutral_location_over_legacy() {
+        let e = env(None, None, Some("/h"), Some("/herdr/cfg"));
+        let loc = locate(
+            &e,
+            existing(&["/h/.config/zextract/config.toml", "/herdr/cfg/config.toml"]),
+        );
+        assert_eq!(
+            loc.path,
+            Some(PathBuf::from("/h/.config/zextract/config.toml"))
+        );
+        assert_eq!(
+            loc.write_target,
+            Some(PathBuf::from("/h/.config/zextract/config.toml"))
+        );
+    }
+
+    #[test]
+    fn locate_falls_back_to_the_legacy_herdr_location() {
+        let e = env(None, None, Some("/h"), Some("/herdr/cfg"));
+        let loc = locate(&e, existing(&["/herdr/cfg/config.toml"]));
+        assert_eq!(loc.path, Some(PathBuf::from("/herdr/cfg/config.toml")));
+        // A starter config would still go to the neutral location.
+        assert_eq!(
+            loc.write_target,
+            Some(PathBuf::from("/h/.config/zextract/config.toml"))
+        );
+    }
+
+    #[test]
+    fn locate_uses_absolute_xdg_config_home_only() {
+        let e = env(None, Some("/x"), Some("/h"), None);
+        let loc = locate(&e, existing(&[]));
+        assert_eq!(loc.path, None);
+        assert_eq!(
+            loc.write_target,
+            Some(PathBuf::from("/x/zextract/config.toml"))
+        );
+        // A relative XDG_CONFIG_HOME is invalid per the spec: use HOME.
+        let e = env(None, Some("rel"), Some("/h"), None);
+        assert_eq!(
+            locate(&e, existing(&[])).write_target,
+            Some(PathBuf::from("/h/.config/zextract/config.toml"))
+        );
+    }
+
+    #[test]
+    fn locate_explicit_wins_and_does_not_fall_back() {
+        let e = env(Some("/my/zx.toml"), None, Some("/h"), Some("/herdr/cfg"));
+        let loc = locate(
+            &e,
+            existing(&["/h/.config/zextract/config.toml", "/herdr/cfg/config.toml"]),
+        );
+        assert_eq!(loc.path, None);
+        assert_eq!(loc.write_target, Some(PathBuf::from("/my/zx.toml")));
+        let loc = locate(&e, existing(&["/my/zx.toml"]));
+        assert_eq!(loc.path, Some(PathBuf::from("/my/zx.toml")));
+    }
+
+    #[test]
+    fn locate_without_home_writes_to_legacy_if_known() {
+        let e = env(None, None, None, Some("/herdr/cfg"));
+        let loc = locate(&e, existing(&[]));
+        assert_eq!(loc.path, None);
+        assert_eq!(
+            loc.write_target,
+            Some(PathBuf::from("/herdr/cfg/config.toml"))
+        );
+        assert_eq!(
+            locate(&env(None, None, None, None), existing(&[])).write_target,
+            None
+        );
+    }
+
+    // ── [host.<name>] overrides ──────────────────────────────────────
+
+    const HOST_TOML: &str = r#"
+[ui]
+preview_open_width = "40%"
+preview_closed_width = "0%"
+
+[actions.url]
+open = "open {match}"
+
+[host.rex.ui]
+preview_open_width = "60%"
+
+[host.rex.actions.url]
+open = "rex-open {match}"
+
+[host.rex.patterns]
+disable = ["url"]
+
+[host.herdr.ui]
+preview_open_width = "50%"
+"#;
+
+    #[test]
+    fn host_overrides_merge_ui_and_actions_for_the_running_host() {
+        let c = Config::from_toml_str(HOST_TOML, "rex").unwrap();
+        assert_eq!(c.ui.preview_open_width, "60%");
+        // Keys the override doesn't name are kept from the root.
+        assert_eq!(c.ui.preview_closed_width, "0%");
+        assert_eq!(c.actions["url"].open.as_deref(), Some("rex-open {match}"));
+        // Sections other than ui/actions are ignored, not applied.
+        assert!(!c.disabled.contains("url"));
+    }
+
+    #[test]
+    fn host_overrides_for_other_hosts_are_ignored() {
+        let c = Config::from_toml_str(HOST_TOML, "herdr").unwrap();
+        assert_eq!(c.ui.preview_open_width, "50%");
+        assert_eq!(c.actions["url"].open.as_deref(), Some("open {match}"));
+        let c = Config::from_toml_str(HOST_TOML, "other").unwrap();
+        assert_eq!(c.ui.preview_open_width, "40%");
+    }
+
+    #[test]
+    fn host_overrides_report_ignored_sections() {
+        let table: toml::Table = toml::from_str(HOST_TOML).unwrap();
+        let (merged, warnings) = apply_host_overrides(table, "rex");
+        assert!(!merged.contains_key("host"));
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("[host.rex.patterns]"), "{warnings:?}");
+    }
+
+    #[test]
+    fn host_override_section_without_a_root_section_is_inserted() {
+        let c =
+            Config::from_toml_str("[host.rex.ui]\npreview_open_width = \"70%\"\n", "rex").unwrap();
+        assert_eq!(c.ui.preview_open_width, "70%");
+        assert_eq!(
+            c.ui.preview_closed_width,
+            UiConfig::default().preview_closed_width
+        );
+    }
+
+    #[test]
+    fn from_toml_str_reports_parse_errors() {
+        assert!(Config::from_toml_str("not = [valid", "herdr").is_err());
+        assert!(Config::from_toml_str("[ui]\npreview_open_width = 3\n", "herdr").is_err());
+    }
 
     #[test]
     fn command_section_triggers_merge_ignore_and_markers_parse() {

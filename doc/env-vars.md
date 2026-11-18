@@ -1,12 +1,17 @@
 # Environment variable reference
 
-`herdr-zextract` reads exactly one environment variable at launch:
+`herdr-zextract` reads these environment variables of its own at launch:
 
 | Variable | Purpose | Default |
 | --- | --- | --- |
 | `ZEXTRACT_PROFILE` | Selects a named profile — grab scope, pattern allowlist, query pre-fill — defined under `[profiles.<name>]` in your own `config.toml` | `open` |
+| `ZEXTRACT_CONFIG` | An explicit config file, used instead of the normal lookup (see [`config-reference.md`](config-reference.md#configuration-reference)) | unset |
+| `ZEXTRACT_HOST` | Forces the multiplexer host (`herdr`) instead of detecting it from the environment | unset (detected) |
 
-That's the whole surface. Grab scope, pattern filtering, and query
+Day to day only `ZEXTRACT_PROFILE` matters; the other two are for
+unusual setups and testing.
+
+Grab scope, pattern filtering, and query
 pre-fill used to be set directly via their own env vars
 (`ZEXTRACT_GRAB`, `ZEXTRACT_PATTERNS`, `ZEXTRACT_TYPE_FILTER`), which
 meant tuning a keybind's behavior meant editing `herdr-plugin.toml` —

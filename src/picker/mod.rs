@@ -200,8 +200,8 @@ struct State {
     filtered: Vec<ScoredMatch>,
     list_state: ListState,
     last_rows: usize,
-    /// True when `$HERDR_PLUGIN_CONFIG_DIR/config.toml` doesn't exist
-    /// yet - shows the config-missing banner and lets `Ctrl-W` write a
+    /// True when no config file exists yet (see `config::locate`) -
+    /// shows the config-missing banner and lets `Ctrl-W` write a
     /// starter file. Cleared after a successful write.
     config_missing: bool,
     /// User dismissed the config-missing banner (`Ctrl-X`) without

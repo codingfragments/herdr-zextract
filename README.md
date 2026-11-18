@@ -47,14 +47,13 @@ Fills the same gap tmux users cover with `extrakto` / `fingers` /
 
 Optional — the plugin works with zero config. To disable built-in
 patterns, tune secret detection, or add your own regex patterns, copy
-[`config.example.toml`](config.example.toml) to:
-
-```sh
-herdr plugin config-dir herdr-zextract   # prints the target directory
-```
-
-as `config.toml`. Or launch the plugin with no config and press
-`Ctrl-W` in the picker — it writes the same template for you.
+[`config.example.toml`](config.example.toml) to
+`~/.config/zextract/config.toml` (or `$XDG_CONFIG_HOME/zextract/`, or
+any path you point `$ZEXTRACT_CONFIG` at). Or launch the plugin with no
+config and press `Ctrl-W` in the picker — it writes the same template
+for you. The old herdr location (`herdr plugin config-dir
+herdr-zextract`) is still read as a fallback. `[host.<name>]` tables
+override `[ui]`/`[actions]` for one multiplexer only.
 
 Full schema: [`doc/config-reference.md`](doc/config-reference.md).
 
