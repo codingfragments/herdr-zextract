@@ -1,6 +1,6 @@
 # Rex migration plan — one binary, two hosts
 
-> **Status: Phases 1–2 done; Phase 3 implemented (PR pending); Phase 4 next.** This is the active plan for this repo.
+> **Status: Phases 1–4 done (Phase 4 PR pending); Phase 5 next.** This is the active plan for this repo.
 > Agents: read this file before starting work, follow the phases in order
 > (one `phase/rex-N-…` branch + PR per phase, see CLAUDE.md gitflow), and
 > tick the checkboxes / update the "Status" lines as phases land.
@@ -252,35 +252,40 @@ checks left for the user, see the end of this section)
 
 ### Phase 4 — Rex launcher (`zextract.lua`) — `phase/rex-4-lua-launcher`
 
-Status: ☐ not started
+Status: ☑ implemented and live-tested on `phase/rex-4-lua-launcher`
+(PR pending)
 
-Shipped in this repo as `rex/zextract.lua` (reference implementation);
-the user copies/symlinks it into `~/.config/rex/plugins/zextract.lua`
-and adds `require("plugins.zextract")` to `init.lua`. The user's Rex
-config already has the helpers it builds on: `lib/env.lua` (login PATH,
-`rex_cli`) and `lib/popup.lua` (floating layer + `requires` preflight).
-The reference file should depend on nothing but `rex.*` and degrade to
-inline equivalents if `lib.env` / `lib.popup` are absent.
-
-- [ ] Action `zextract{ profile = "string?" }`:
-  1. `rex.session.view{session_id = ctx.session_id}` → active window →
-     `focused_block_id` **before** the popup takes focus (same pattern as
-     the user's `edit_scrollback`).
-  2. Open a floating layer (80 %×80 %, `shell = "none"`) running
-     `env PATH=<login PATH> ZEXTRACT_HOST=rex REX_CLI=<abs> \
-      REX_SESSION=<sid> ZEXTRACT_SOURCE_BLOCK=<b> ZEXTRACT_SOURCE_WINDOW=<w> \
-      ZEXTRACT_PROFILE=<p> herdr-zextract`.
-  3. Preflight (`requires`): `command herdr-zextract`, hint
-     `mise use -g github:codingfragments/herdr-zextract` ; plus
-     `herdr-zextract --host-api` ≥ expected, hint `mise up herdr-zextract`.
-- [ ] Bindings (herdr parity, prefix `ctrl+s`):
-  `ctrl+s>f` → `open`, `ctrl+s>shift+f` → `tab`,
-  `ctrl+s>u` → `url`, `ctrl+s>shift+u` → `url-tab`.
-  Custom slots need no packaging under Rex — any `profile` string works
-  (`rex.bind("…", "zextract", {profile = "custom0"})`).
-- [ ] Verify live (spike list below), especially insert focus-return.
-- [ ] Docs: `doc/rex.md` (install via mise, Lua snippet, bindings,
-  remote-host notes); README "Hosts" section.
+- [x] `rex/zextract.lua`: self-contained launcher; uses `lib.env`
+  (login PATH, `rex_cli`) when present, else inline fallbacks (default
+  PATH, the app-bundle rex CLI). Action `zextract{profile = "string?"}`:
+  `rex.session.view` → active window → `focused_block_id` before the
+  layer takes focus; floating layer 80 %×80 %, `shell = "none"`; env
+  `ZEXTRACT_HOST=rex REX_CLI REX_SESSION ZEXTRACT_SOURCE_BLOCK
+  ZEXTRACT_SOURCE_WINDOW ZEXTRACT_PROFILE`. The preflight (POSIX sh,
+  inside the layer, so it also names the remote host) checks
+  `command -v herdr-zextract` (hint `mise use -g …`) and `--host-api`
+  (hint `mise up herdr-zextract`), then `exec`s the binary.
+- [x] Bindings: `ctrl+s>f` open, `ctrl+s>shift+f` tab, `ctrl+s>u` url,
+  `ctrl+s>shift+u` url-tab; verified with `rex keymap` (81 bindings
+  after reload). Custom profiles need no packaging.
+- [x] **Live-tested** in a throwaway session with the launcher installed
+  in the user's Rex config (dotfiles branch `feat/rex-zextract-plugin`):
+  - `open` profile: popup over the source pane, picker populated from
+    its scrollback.
+  - insert: typed the picked URL into the source pane's prompt and
+    closed the popup.
+  - **Spike S1 answered — yes:** after the floating layer closes, the
+    window's `focused_block_id` is back on the source block, so typing
+    after the popup lands in the right pane.
+  - `tab` profile: matches from both panes of a split, popup excluded.
+- [x] Docs: `doc/rex.md` (install, bindings, remote-host notes, limits),
+  README "Hosts" + Rex install sections.
+- Spike S2 (OSC 52 through a Rex layer) still open: on the dev Mac the
+  system clipboard answers first, so the fallback path isn't exercised;
+  matters only for remote/headless hosts.
+- The binary is not yet mise-installed; for testing the dev build is
+  symlinked to `~/.local/bin/herdr-zextract`. Phase 5 replaces that
+  with the real mise install.
 
 ### Phase 5 — distribution polish — `phase/rex-5-distribution`
 
@@ -316,7 +321,7 @@ Status: ☐ not started
 
 | # | Question | Result |
 |---|---|---|
-| S1 | After the floating layer closes, does focus return to the source block (so `rex send` lands where the user expects)? | ☐ |
+| S1 | After the floating layer closes, does focus return to the source block (so `rex send` lands where the user expects)? | ☑ 2026-11, Phase 4 live test: yes |
 | S2 | Does Rex pass OSC 52 from a floating-layer terminal to the macOS clipboard (local and remote host)? | ☐ |
 | S3 | `rex capture --unwrap` vs herdr `recent_unwrapped`: same line semantics for freshness/offsets? Size/latency on ~100k lines? | ☐ |
 | S4 | `session inspect --json` shape: how to tell floating-layer blocks from window blocks; where are block labels/titles? | ☐ |

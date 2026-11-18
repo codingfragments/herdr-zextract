@@ -115,10 +115,11 @@ For a local checkout: `just link` (builds, then `herdr plugin link .`;
 
 ### Rex
 
-Rex support is in progress (see [`rex-migration.md`](rex-migration.md)):
-the same binary, installed with
-`mise use -g github:codingfragments/herdr-zextract`, plus a small Lua
-launcher in your Rex config.
+The same binary, installed with
+`mise use -g github:codingfragments/herdr-zextract`, plus the Lua
+launcher from [`rex/zextract.lua`](rex/zextract.lua) in your Rex config
+(bindings `ctrl+s>f/F/u/U`). Full guide:
+[`doc/rex.md`](doc/rex.md).
 
 ### From source
 
@@ -128,6 +129,16 @@ cargo install --git https://github.com/codingfragments/herdr-zextract --tag v0.7
 
 Requires [Herdr](https://herdr.dev/install.sh) or Rex itself to be
 installed first.
+
+## Hosts
+
+One binary, one config (`~/.config/zextract/config.toml`) under both
+multiplexers:
+
+- **Herdr:** popup pane via `herdr-plugin.toml`, keybinds through
+  plugin actions ([`doc/keybinding.md`](doc/keybinding.md)).
+- **Rex:** floating layer via [`rex/zextract.lua`](rex/zextract.lua),
+  keybinds `ctrl+s>f/F/u/U` ([`doc/rex.md`](doc/rex.md)).
 
 ## Platform support
 
