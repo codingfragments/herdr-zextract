@@ -122,6 +122,19 @@ fn run() -> Result<(), String> {
 }
 
 fn main() {
+    // Plain flags for launchers and install scripts, answered before any
+    // host detection or terminal setup.
+    match std::env::args().nth(1).as_deref() {
+        Some("--version") | Some("-V") => {
+            println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+            return;
+        }
+        Some("--host-api") => {
+            println!("{}", host::HOST_API);
+            return;
+        }
+        _ => {}
+    }
     if let Err(message) = run() {
         eprintln!("herdr-zextract error: {message}");
     }

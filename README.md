@@ -92,39 +92,42 @@ all three via GitHub Actions — see
 
 ## Install
 
-*(Not yet available — both paths below are planned; see
-[PLANNING.md §8](PLANNING.md#8-install--distribution-plan) for full
-detail.)*
+### Herdr
 
-Both options below need a working Rust/`cargo` toolchain on the machine
-running the install command — neither is a prebuilt-binary download (that
-would be stretch-goal Option C in PLANNING.md, once release automation
-exists).
-
-**Option A — `herdr plugin install` (clone + build via the manifest):**
 ```sh
-herdr plugin install codingfragments/herdr-zextract
+herdr plugin install codingfragments/herdr-zextract            # newest release
+herdr plugin install codingfragments/herdr-zextract --ref v0.7.0  # pinned
 ```
-This only builds anything because this repo's `herdr-plugin.toml` will
-declare an explicit `[[build]]` step (`cargo build --release`) — Herdr
-does not auto-detect Rust projects and build them on its own. No
-`[[build]]` declaration means no compilation, regardless of project type.
-`herdr plugin link` (for a local checkout) skips `[[build]]` entirely; you
-build it yourself first.
 
-**Option B — install a labeled stable release directly onto `PATH`
-(recommended once releases exist):**
+The manifest's `[[build]]` step (`bin/fetch-binary`) downloads the
+release binary for that version from GitHub releases (sha256-checked),
+so **no Rust toolchain is needed** for tagged versions. Installing from a
+branch or untagged commit builds from source with `cargo build
+--release` instead (falling back to the release binary, with a warning,
+when cargo is missing). `ZEXTRACT_BUILD=source|download` forces one way.
+
+The popup starts `bin/zextract-launch`, which runs the plugin's own
+`target/release/herdr-zextract`, or a `herdr-zextract` on `PATH` if the
+plugin has none.
+
+For a local checkout: `just link` (builds, then `herdr plugin link .`;
+`link` skips `[[build]]`).
+
+### Rex
+
+Rex support is in progress (see [`rex-migration.md`](rex-migration.md)):
+the same binary, installed with
+`mise use -g github:codingfragments/herdr-zextract`, plus a small Lua
+launcher in your Rex config.
+
+### From source
+
 ```sh
-cargo install --git https://github.com/codingfragments/herdr-zextract --tag v0.1.0
+cargo install --git https://github.com/codingfragments/herdr-zextract --tag v0.7.0
 ```
-This is `cargo install`, so it also compiles from source (just without a
-manifest-driven `[[build]]` step or a repo clone to manage) — a `cargo`
-toolchain is required here too. Once installed, point a minimal
-`herdr-plugin.toml` at the installed binary and bind a key to it in your
-Herdr config.
 
-Requires [Herdr](https://herdr.dev/install.sh) itself to be installed
-first.
+Requires [Herdr](https://herdr.dev/install.sh) or Rex itself to be
+installed first.
 
 ## Platform support
 
