@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-11-19
+
+### Changed
+
+- The multiplexer host layer (`src/host/` — `Host` trait, herdr and
+  Rex backends, clipboard with OSC 52 fallback, fake host) moved to the
+  shared crate [`muxhost`](https://github.com/codingfragments/muxhost)
+  (v0.1.0), which this binary now depends on. No behavior change — the
+  switch is the first consumer of the crate that was extracted from
+  this repo; herdr-flash and herdr-nav follow. The host tests moved
+  with the module.
+
 ## [0.7.0] - 2026-11-17
 
 The Rex release: one binary, one config, two multiplexers. See
