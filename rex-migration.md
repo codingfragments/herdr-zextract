@@ -48,8 +48,24 @@ today; Rex gets a thin Lua launcher.
   resolves `0.3.0 … 0.6.0` (plus the rolling `latest` tag — see Phase 5).
   Update = `mise up --bump`. No Rust toolchain on user machines. Fallback
   for hosts without mise: the Lua launcher's popup preflight (see Phase 4).
-- **Single installed binary for both hosts:** herdr's manifest stops
-  building its own copy and runs `herdr-zextract` from `PATH` (Phase 3).
+- **Two install paths, one release (decided 2026-11, "option B"):**
+  `herdr plugin install` must keep working on its own, without mise.
+  - **herdr:** `herdr plugin install codingfragments/herdr-zextract`
+    stays a single command. Its `[[build]]` step runs
+    `bin/fetch-binary`, which downloads the release binary matching the
+    checked-out version into `target/release/` (sha256-checked) and
+    falls back to `cargo build --release` when no release asset matches.
+    Tagged versions therefore need no Rust.
+  - **Rex:** `mise use -g github:codingfragments/herdr-zextract`.
+  - The herdr manifest starts `bin/zextract-launch`, which prefers the
+    plugin's own `target/release/herdr-zextract`, then falls back to
+    `herdr-zextract` on `PATH`. `just link` (dev) keeps working because
+    it builds into `target/release/` first.
+  - Trade-off: herdr and Rex each have their own copy and can drift in
+    version; update both (`herdr plugin install --ref …` and `mise up`).
+  - The earlier idea, herdr running only the `PATH` binary with no
+    `[[build]]`, was dropped: it would have made `herdr plugin install`
+    depend on mise.
 
 ## Host-coupled surface today (what moves behind the trait)
 
@@ -188,12 +204,26 @@ Status: ☐ not started
   `--host-api` printing an integer the Lua launcher can check (start at 1).
 - [ ] Tests: `RexHost` JSON parsing of `session inspect` fixtures
   (record real output into `tests/fixtures/rex/`), arg construction.
-- [ ] **Herdr manifest:** `herdr-plugin.toml` `[[panes]].command =
-  ["herdr-zextract"]` (PATH / mise install), drop `[[build]]`. Keep a
-  dev note: `just link` still builds locally and puts
-  `target/release` first via the justfile, so dev builds keep working.
-  *(Check: does herdr's popup inherit the login PATH incl. mise? If not,
-  document an absolute path or keep `[[build]]` as an opt-in.)*
+- [ ] **Herdr install, option B** (see "Decisions"):
+  - `bin/fetch-binary` (POSIX sh): reads `version` from `Cargo.toml`,
+    maps `uname -s`/`uname -m` to the release triple, downloads
+    `herdr-zextract-<triple>.tar.gz` and its `.sha256` from the
+    `v<version>` release with `curl`, verifies the checksum
+    (`shasum -a 256` or `sha256sum`) and unpacks it into
+    `target/release/`. If anything fails (no asset, no network, no
+    match), it falls back to `cargo build --release` and says why.
+  - `herdr-plugin.toml`: `[[build]] command = ["sh", "bin/fetch-binary"]`;
+    `[[panes]].command = ["sh", "bin/zextract-launch"]`.
+  - `bin/zextract-launch` (POSIX sh): exec
+    `./target/release/herdr-zextract` if it exists, else
+    `herdr-zextract` from `PATH`; if neither exists, print an install
+    hint and wait for Enter, so the popup doesn't flash shut.
+  - Launcher actions pass `--env ZEXTRACT_HOST=herdr` explicitly, so
+    herdr-inside-Rex (or the reverse) can't be detected as the wrong
+    host.
+  - Verify live: `herdr plugin install` from a branch/tag runs
+    `[[build]]` with a custom command, and `herdr plugin link .` +
+    `just link` still run the dev build.
 
 ### Phase 4 — Rex launcher (`zextract.lua`) — `phase/rex-4-lua-launcher`
 
@@ -231,17 +261,18 @@ inline equivalents if `lib.env` / `lib.popup` are absent.
 
 Status: ☐ not started
 
-- [ ] Rolling `latest` tag/release: mise lists it as a version
-  (`mise ls-remote` shows `latest`), which makes `= "latest"` in mise
-  ambiguous. Decide: drop the rolling release (it only existed for
-  `herdr plugin install --ref latest`, obsolete once herdr runs the PATH
-  binary) **or** keep it and document "pin exact versions in mise".
-  Recommendation: drop it.
+- [ ] Rolling `latest` tag/release: **keep it** (option B). `herdr plugin
+  install --ref latest` (`just install`) still uses it, and
+  `bin/fetch-binary` resolves the binary from the version in that
+  ref's `Cargo.toml`, so it gets the matching release. mise lists
+  `latest` as a version, so document "pin exact versions in mise"
+  instead of using `= "latest"`.
 - [ ] Verify `mise use -g github:codingfragments/herdr-zextract@<ver>` on
   macOS arm64 and one Linux host picks the right asset and the binary
   name inside the tarball (`herdr-zextract`).
-- [ ] README Install section rewritten: mise first, `cargo install --git`
-  as the source fallback, herdr-specific bits under "Herdr".
+- [ ] README Install section rewritten: "Herdr" (`herdr plugin install`,
+  no Rust needed for tagged versions) and "Rex" (mise), with
+  `cargo install --git` as the source fallback.
 - [ ] Optional, later: rename binary/repo to `zextract` (GitHub
   redirects; mise tool id changes once). Not part of this migration.
 
@@ -250,7 +281,8 @@ Status: ☐ not started
 Status: ☐ not started
 
 - [ ] Version bump + CHANGELOG ("Rex support", "neutral config path",
-  "herdr runs PATH binary"), tag per CLAUDE.md release process.
+  "herdr plugin install downloads the release binary"), tag per CLAUDE.md
+  release process.
 - [ ] Update the user's Rex `migration-plan.md`
   (`~/.config/rex/migration-plan.md`, dotfiles repo — separate PR there):
   move zextract from "impossible" to "done".
@@ -263,7 +295,7 @@ Status: ☐ not started
 | S2 | Does Rex pass OSC 52 from a floating-layer terminal to the macOS clipboard (local and remote host)? | ☐ |
 | S3 | `rex capture --unwrap` vs herdr `recent_unwrapped`: same line semantics for freshness/offsets? Size/latency on ~100k lines? | ☐ |
 | S4 | `session inspect --json` shape: how to tell floating-layer blocks from window blocks; where are block labels/titles? | ☐ |
-| S5 | Does herdr's popup inherit a PATH that contains mise installs (`herdr-plugin.toml` with bare `herdr-zextract`)? | ☐ |
+| S5 | Does herdr's popup inherit a PATH that contains mise installs (`herdr-plugin.toml` with bare `herdr-zextract`)? | ☑ 2026-11: yes on the user's Mac — the herdr server processes carry the login PATH incl. `~/.local/share/mise/shims`, so later `mise use -g` installs are found without restarting herdr. Now only relevant for `zextract-launch`'s PATH fallback (option B). |
 | S6 | Remote Rex session: popup runs on the remote host — `open`/`edit`/`reveal` act there. Acceptable, or gate verbs by host? | ☐ |
 | S7 | mise github backend picks `herdr-zextract-<triple>.tar.gz` correctly on all three targets | ☐ |
 
