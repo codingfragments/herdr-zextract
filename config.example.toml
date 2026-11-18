@@ -1,9 +1,12 @@
 # herdr-zextract config
 #
-# Copy this file to the path printed by:
-#   herdr plugin config-dir herdr-zextract
-# as config.toml (or run the plugin once with no config and press
-# Ctrl-W in the picker to have it write this same file for you).
+# Copy this file to ~/.config/zextract/config.toml
+# ($XDG_CONFIG_HOME/zextract/config.toml if you set XDG_CONFIG_HOME,
+# or any path you point $ZEXTRACT_CONFIG at) - or run the plugin once
+# with no config and press Ctrl-W in the picker to have it write this
+# same file for you. The old herdr location
+# ($(herdr plugin config-dir herdr-zextract)/config.toml) is still read
+# as a fallback.
 #
 # Full reference: doc/config-reference.md in the plugin repo.
 # This file is read once per popup launch - no live reload.

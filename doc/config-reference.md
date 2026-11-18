@@ -1,16 +1,22 @@
 # Configuration reference
 
-`herdr-zextract` reads `$HERDR_PLUGIN_CONFIG_DIR/config.toml` once at
-startup (config is a per-invocation snapshot — no live reload while the
-popup is open). Find your config dir with:
+`herdr-zextract` reads one `config.toml` once at startup (config is a
+per-invocation snapshot — no live reload while the popup is open). The
+first of these that exists wins:
 
-```sh
-herdr plugin config-dir herdr-zextract
-```
+1. `$ZEXTRACT_CONFIG` — an explicit file. When set, it is the only
+   place looked at (no fallback), and `Ctrl-W` writes there.
+2. `$XDG_CONFIG_HOME/zextract/config.toml` (absolute `XDG_CONFIG_HOME`
+   only), else `~/.config/zextract/config.toml` — the normal location,
+   shared by every multiplexer the plugin runs under.
+3. `$HERDR_PLUGIN_CONFIG_DIR/config.toml` — the legacy herdr location
+   (`herdr plugin config-dir herdr-zextract`), read as a fallback so
+   existing setups keep working. Move the file to (2) when convenient.
 
-If the file is missing, or fails to parse, built-in defaults are used —
+If no file exists, or it fails to parse, built-in defaults are used —
 a broken config never crashes the plugin (a parse error is reported on
-stderr, visible in `herdr plugin log`).
+stderr, visible in `herdr plugin log`). With no file at all, the picker
+offers `Ctrl-W` to write the template to (1) if set, else (2).
 
 **Template:** [`config.example.toml`](../config.example.toml) at the
 repo root is a ready-to-copy starter with every key from this doc,
@@ -545,3 +551,31 @@ Omitting a key keeps its built-in default. Setting a key to `0`
 disables that verb entirely, for every type — the picker refuses it
 the same way it refuses a type-mismatched verb, rather than treating it
 as "cap exceeded."
+
+## `[host.<name>]` — per-multiplexer overrides
+
+One config serves every multiplexer the plugin runs under (`herdr`
+today, `rex` once supported). A `[host.<name>]` table overrides parts of
+the config for one host only:
+
+```toml
+[ui]
+preview_open_width = "40%"
+
+[actions.url]
+open = "open {match}"
+
+# Only when running under rex:
+[host.rex.ui]
+preview_open_width = "60%"
+
+[host.rex.actions.url]
+open = "xdg-open {match}"
+```
+
+- Supported sections: `ui` and `actions`. They are deep-merged over the
+  root: keys the override names replace the root's, everything else is
+  kept. Any other section under `[host.<name>]` is ignored with a
+  warning on stderr.
+- `<name>` is the host the plugin detected (`herdr`, `rex`); sections
+  for other hosts are ignored.
