@@ -344,7 +344,7 @@ fn join<'a>(matches: &[&'a Match], f: impl Fn(&'a Match) -> &'a String, sep: &st
 }
 
 fn copy_to_clipboard(text: &str) -> Outcome {
-    match arboard::Clipboard::new().and_then(|mut c| c.set_text(text.to_string())) {
+    match crate::host::clipboard::copy(text) {
         Ok(()) => Outcome::Done(format!("copied: {text}")),
         Err(e) => Outcome::Failed(format!("copy failed: {e}")),
     }

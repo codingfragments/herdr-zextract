@@ -7,7 +7,8 @@
 //! **Built to move into the shared `muxhost` crate later**
 //! (rex-migration.md, "Built to move into `muxhost` later"). Keep this
 //! module self-contained:
-//! - Use only `std` and `serde_json`. Nothing from the rest of the crate:
+//! - Use only `std`, `serde_json` and (for [`clipboard`]) `arboard`.
+//!   Nothing from the rest of the crate:
 //!   no `crate::config`, `crate::matcher`, `crate::actions`, and no
 //!   zextract types in signatures.
 //! - Errors are plain `String`s, and the module does not log.
@@ -17,8 +18,16 @@
 //!   methods, so later additions (colored reads for flash, scroll info)
 //!   don't break existing implementations.
 
+pub mod clipboard;
 pub mod herdr;
+pub mod rex;
 mod socket_client;
+
+/// Version of the host interface this binary offers, printed by
+/// `--host-api`. Launchers (e.g. `rex/zextract.lua`) check it to warn
+/// about a binary that is too old for them. Bump it when a launcher
+/// starts relying on something new (env vars, flags).
+pub const HOST_API: u32 = 1;
 
 #[cfg(test)]
 pub mod fake;
@@ -80,17 +89,20 @@ pub trait Host {
 
 /// Pick the host from the environment.
 ///
-/// `prefix` is the tool's env prefix (e.g. `"ZEXTRACT"`): an explicit
-/// `<prefix>_HOST=herdr` wins; otherwise herdr is chosen when
-/// `HERDR_SOCKET_PATH` is set. (Rex support follows in rex-migration.md
-/// Phase 3.)
+/// `prefix` is the tool's env prefix (e.g. `"ZEXTRACT"`):
+/// 1. An explicit `<prefix>_HOST=herdr|rex` wins. Launchers set it, so a
+///    herdr running inside a Rex terminal (or the reverse) can't be
+///    mistaken for the other host.
+/// 2. Otherwise `HERDR_SOCKET_PATH` means herdr,
+/// 3. else `REX_SESSION` means Rex.
 pub fn detect(prefix: &str) -> Result<Box<dyn Host>, String> {
     let host_var = format!("{prefix}_HOST");
     match std::env::var(&host_var).ok().as_deref() {
         Some("herdr") => return Ok(Box::new(herdr::HerdrHost::from_env()?)),
+        Some("rex") => return Ok(Box::new(rex::RexHost::from_env(prefix)?)),
         Some(other) if !other.is_empty() => {
             return Err(format!(
-                "{host_var}={other:?} is not a supported host (supported: herdr)"
+                "{host_var}={other:?} is not a supported host (supported: herdr, rex)"
             ));
         }
         _ => {}
@@ -98,7 +110,11 @@ pub fn detect(prefix: &str) -> Result<Box<dyn Host>, String> {
     if std::env::var_os("HERDR_SOCKET_PATH").is_some() {
         return Ok(Box::new(herdr::HerdrHost::from_env()?));
     }
+    if std::env::var_os("REX_SESSION").is_some() {
+        return Ok(Box::new(rex::RexHost::from_env(prefix)?));
+    }
     Err(format!(
-        "no multiplexer host detected: HERDR_SOCKET_PATH is not set (or set {host_var}=herdr)"
+        "no multiplexer host detected: neither HERDR_SOCKET_PATH nor REX_SESSION is set \
+         (or set {host_var}=herdr|rex)"
     ))
 }

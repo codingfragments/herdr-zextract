@@ -1,6 +1,6 @@
 # Rex migration plan — one binary, two hosts
 
-> **Status: Phases 1–2 done (Phase 2 PR pending); Phase 3 next.** This is the active plan for this repo.
+> **Status: Phases 1–2 done; Phase 3 implemented (PR pending); Phase 4 next.** This is the active plan for this repo.
 > Agents: read this file before starting work, follow the phases in order
 > (one `phase/rex-N-…` branch + PR per phase, see CLAUDE.md gitflow), and
 > tick the checkboxes / update the "Status" lines as phases land.
@@ -148,7 +148,7 @@ Status: ☑ done (PR #38)
 
 ### Phase 2 — neutral config location — `phase/rex-2-config-path`
 
-Status: ☑ implemented on `phase/rex-2-config-path` (PR pending)
+Status: ☑ done (PR #39)
 
 - [x] Config lookup order (`config::locate`, pure and unit-tested; first
   existing file wins):
@@ -178,52 +178,77 @@ Status: ☑ implemented on `phase/rex-2-config-path` (PR pending)
 
 ### Phase 3 — `RexHost` + host detection — `phase/rex-3-rex-host`
 
-Status: ☐ not started
+Status: ☑ implemented on `phase/rex-3-rex-host` (PR pending; two live
+checks left for the user, see the end of this section)
 
-- [ ] `src/host/rex.rs`, all calls via `std::process::Command` on
-  `$REX_CLI` (default `rex`), always with `-s $REX_SESSION`:
-  - `read_pane`: `capture -b B --unwrap --trim`, then keep the last
-    `lines` lines (if set). Viewport: last *rows* lines (query `size`
-    once via `block call … size`; fall back to the whole capture).
-  - `list_tab_panes`: `session inspect $REX_SESSION --json`, pick window
-    `ZEXTRACT_SOURCE_WINDOW` (fallback: `active_window_id`), collect its
-    terminal blocks (flavor `com.superlogical.terminal*`), **exclude
-    floating-layer blocks** (the popup itself), focused/source first.
-    Title: block label → terminal title (`block call … title`) → id.
-  - `insert_text`: `send -b B -- TEXT`.
-- [ ] `host::detect("ZEXTRACT")` (prefix param, see "Built to move into `muxhost`"):
-  `ZEXTRACT_HOST=rex|herdr` wins; else `HERDR_SOCKET_PATH` → herdr;
-  else `REX_SESSION` → rex; else a clear error listing both.
-- [ ] Source must come from `ZEXTRACT_SOURCE_BLOCK` (required under
-  Rex — error message points at the Lua launcher).
-- [ ] Clipboard: keep `arboard` locally; when the session runs on a
-  remote/headless host (no display / arboard error) fall back to
-  **OSC 52** written to the popup's tty. Verify Rex passes OSC 52 through
-  (Rex exposes `terminal.clipboard_read`, so it intercepts it — spike).
-- [ ] `--version` (no clap dependency today — hand-parse, keep it minimal) and
-  `--host-api` printing an integer the Lua launcher can check (start at 1).
-- [ ] Tests: `RexHost` JSON parsing of `session inspect` fixtures
-  (record real output into `tests/fixtures/rex/`), arg construction.
-- [ ] **Herdr install, option B** (see "Decisions"):
-  - `bin/fetch-binary` (POSIX sh): reads `version` from `Cargo.toml`,
-    maps `uname -s`/`uname -m` to the release triple, downloads
-    `herdr-zextract-<triple>.tar.gz` and its `.sha256` from the
-    `v<version>` release with `curl`, verifies the checksum
-    (`shasum -a 256` or `sha256sum`) and unpacks it into
-    `target/release/`. If anything fails (no asset, no network, no
-    match), it falls back to `cargo build --release` and says why.
-  - `herdr-plugin.toml`: `[[build]] command = ["sh", "bin/fetch-binary"]`;
-    `[[panes]].command = ["sh", "bin/zextract-launch"]`.
-  - `bin/zextract-launch` (POSIX sh): exec
-    `./target/release/herdr-zextract` if it exists, else
-    `herdr-zextract` from `PATH`; if neither exists, print an install
-    hint and wait for Enter, so the popup doesn't flash shut.
-  - Launcher actions pass `--env ZEXTRACT_HOST=herdr` explicitly, so
-    herdr-inside-Rex (or the reverse) can't be detected as the wrong
-    host.
-  - Verify live: `herdr plugin install` from a branch/tag runs
-    `[[build]]` with a custom command, and `herdr plugin link .` +
-    `just link` still run the dev build.
+- [x] `src/host/rex.rs`, all calls through the `rex` CLI (`$REX_CLI`,
+  default `rex`) behind a small `RexRunner` trait (tests use a fake that
+  records the exact arguments):
+  - Scrollback: `capture -s S -b B --unwrap --trim`, last `lines` lines.
+  - Viewport: `capture -s S -b B` (no unwrap: screen rows are wrapped
+    rows), last *rows* lines from `block call … size`; whole capture if
+    `size` fails.
+  - `list_tab_panes`: `session inspect S --json`; window =
+    `ZEXTRACT_SOURCE_WINDOW`, else the window holding the source block,
+    else `active_window_id`; blocks of `kind = "tiled"` layers whose
+    `creator_name` starts with `com.superlogical.terminal`; floating
+    layers (the popup) excluded; source first.
+  - Titles: a user-set label; Rex labels every new shell block `shell`,
+    so for that label the terminal title (`block call … title`) is used,
+    then the label, then `pane <id>`.
+  - `insert_text`: `send -s S -b B` with the text on **stdin**, so text
+    starting with `-` or containing newlines arrives exactly.
+- [x] `host::detect("ZEXTRACT")`: `ZEXTRACT_HOST=herdr|rex` wins; else
+  `HERDR_SOCKET_PATH` → herdr; else `REX_SESSION` → rex; else an error
+  naming both.
+- [x] `ZEXTRACT_SOURCE_BLOCK` is required under Rex; the error points at
+  the Lua launcher. (Verified live: once the popup layer opens, the
+  window's `focused_block_id` *is* the popup, so there is no safe
+  fallback.)
+- [x] Clipboard: `src/host/clipboard.rs` - `arboard`, falling back to
+  OSC 52 on `/dev/tty` when there is no system clipboard (headless /
+  remote). Hand-rolled base64 (RFC 4648 vectors tested), no new
+  dependency. Whether Rex forwards OSC 52 from a floating layer to the
+  Mac clipboard stays spike S2 (Phase 4).
+- [x] `--version` / `-V` and `--host-api` (`host::HOST_API = 1`),
+  answered before host detection.
+- [x] Tests: `tests/fixtures/rex/session-inspect.json` recorded from a
+  live Rex session (two windows, two tiled shells, one floating popup);
+  13 Rex tests (window choice, popup exclusion, titles, line caps,
+  exact CLI arguments, stdin insert, error pass-through). `just check`
+  green, 320 tests.
+- [x] **Live test in Rex** (throwaway session, binary run in a floating
+  layer like the launcher will): the `tab` profile listed both tiled
+  panes and not the popup, the terminal title showed for the generic
+  label, and `Tab` + `i` inserted the URL into the source block.
+- [x] **Herdr install, option B:**
+  - `bin/fetch-binary`: tagged commit (or no git info) → download the
+    `v<version>` release asset for the platform, sha256-check, unpack
+    into `target/release/`; on failure → `cargo build --release`.
+    Untagged commit → `cargo build --release` (the release binary would
+    be older than the code); without cargo → the release binary with a
+    warning. `ZEXTRACT_BUILD=source|download` forces one way. Tested:
+    a `v0.6.0` clone downloads and installs the arm64 binary; an
+    untagged commit without cargo falls back to the download with the
+    warning; a missing release fails cleanly with the URL.
+  - `bin/zextract-launch`: `target/release/herdr-zextract`, else
+    `herdr-zextract` on `PATH`, else an install hint that waits for
+    Enter. It also sets `ZEXTRACT_HOST=herdr` itself, so the launcher
+    actions stay unchanged (herdr's `--help` doesn't say whether
+    `--env` may be repeated).
+  - `herdr-plugin.toml`: `[[build]] command = ["./bin/fetch-binary"]`,
+    `[[panes]].command = ["./bin/zextract-launch"]` (relative like the
+    old `./target/release/…` path, scripts are committed executable).
+- [x] Docs: `README.md` Install section rewritten (herdr, Rex, source),
+  `doc/env-vars.md` (Rex env vars, `ZEXTRACT_BUILD`, the two flags).
+- [ ] **Left for the user to verify in herdr** (both change the user's
+  installed plugin, so not done automatically):
+  1. With the linked checkout (`just link`), the popup still opens via
+     `bin/zextract-launch`.
+  2. `herdr plugin install codingfragments/herdr-zextract --ref <tag>`
+     runs `bin/fetch-binary` as its `[[build]]` step. Only testable
+     once a release contains the scripts (Phase 6); until then
+     `--ref phase/rex-3-rex-host` exercises the source-build path.
 
 ### Phase 4 — Rex launcher (`zextract.lua`) — `phase/rex-4-lua-launcher`
 
