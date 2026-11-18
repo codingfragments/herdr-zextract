@@ -5,6 +5,59 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-11-17
+
+The Rex release: one binary, one config, two multiplexers. See
+`rex-migration.md` for the full plan this implements.
+
+### Added
+
+- **Rex support** (superlogical's terminal multiplexer): the same
+  binary runs under herdr *and* Rex. Host detection via
+  `ZEXTRACT_HOST` (explicit) or `HERDR_SOCKET_PATH` / `REX_SESSION`
+  (auto). All multiplexer access now goes through a `Host` trait
+  (`src/host/`), so the matchers, picker and actions are unchanged.
+  - Rex reads panes via `rex capture` (scrollback with line caps,
+    viewport via the terminal size), lists the tab's panes via
+    `rex session inspect` (tiled layers only — the popup itself is
+    never listed), and inserts via `rex send`.
+  - A pane's title under Rex: a user-set label, else the terminal
+    title (Rex labels every new shell `shell`), else `pane <id>`.
+  - `rex/zextract.lua`: the Rex launcher (copy to
+    `~/.config/rex/plugins/zextract.lua`). Finds the focused pane
+    before the popup opens, checks the binary and its `--host-api`,
+    and binds `ctrl+s>f/F/u/U` like herdr. Guide: `doc/rex.md`.
+  - Under Rex the source pane is passed explicitly
+    (`ZEXTRACT_SOURCE_BLOCK`): inside the popup, `REX_BLOCK` names the
+    popup itself.
+- `--version` and `--host-api` flags (for launchers and install
+  scripts; answered before host detection).
+- Copy falls back to an **OSC 52** escape sequence when there is no
+  system clipboard (headless / remote hosts behind Rex or ssh).
+
+### Changed
+
+- **Config location is neutral**: `$ZEXTRACT_CONFIG`, else
+  `~/.config/zextract/config.toml` (`$XDG_CONFIG_HOME` aware), else
+  the legacy `$HERDR_PLUGIN_CONFIG_DIR/config.toml` as a fallback.
+  One file serves both hosts. `Ctrl-W` writes the starter config to
+  the neutral location.
+- **`[host.<name>]` config tables** override `[ui]` and `[actions]` for
+  one multiplexer only (deep-merged; other sections are ignored with
+  a warning).
+
+### Herdr install
+
+- `herdr plugin install` now needs **no Rust toolchain** for released
+  versions: the `[[build]]` step (`bin/fetch-binary`) downloads the
+  release binary for the checked-out version (sha256-checked) and
+  falls back to `cargo build --release` on untagged commits or when
+  the download fails. `ZEXTRACT_BUILD=source|download` forces one way.
+- The popup starts via `bin/zextract-launch`: the plugin's own binary,
+  else a `herdr-zextract` on `PATH`, else an install hint. It also
+  pins `ZEXTRACT_HOST=herdr`.
+- Dev workflow unchanged: `just link` builds and links the checkout.
+
 ## [0.6.0] - 2026-10-16
 
 ### Added
