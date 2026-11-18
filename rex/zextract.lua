@@ -77,6 +77,29 @@ local function popup_command(sid, block, window, profile)
   }
 end
 
+-- ── Focus return on popup close ──────────────────────────────────
+-- Server-side, focus returns to the source pane when the layer
+-- closes (verified headless). The Rex *app*, though, can land its own
+-- focus on the last pane of the tab instead (observed live). A
+-- one-shot watcher re-focuses the source pane when the popup's block
+-- ends. Config-side `rex.on` needs a newer Rex (the server warns it
+-- does nothing here), so the watcher runs as a detached `rex do`
+-- script via `rex.exec.start`; it stops itself after one event.
+
+local function watcher_code(popup_block, sid, source_block, source_window)
+  return string.format(
+    [[rex.on("block_closed", function(_, info)
+  if type(info) ~= "table" or info.block_id ~= %q then return end
+  local ok, v = pcall(rex.session.view, { session_id = %q })
+  if ok and v and v.active_window_id == %q then
+    pcall(rex.session.focus_block, { session_id = %q, block_id = %q })
+  end
+  rex.stop()
+end)]],
+    popup_block, sid, source_window, sid, source_block
+  )
+end
+
 rex.action{
   name  = "zextract",
   title = "zextract",
@@ -113,6 +136,20 @@ rex.action{
       focus = true,
     }
     if err then error(err, 0) end
+    -- See "Focus return on popup close" above. `rex.exec.start` is not
+    -- callable from config Lua on this Rex version, so the watcher is
+    -- detached through a shell that backgrounds and exits; nohup keeps
+    -- it alive after the action returns. The pieces are known to be
+    -- free of single quotes (paths, ids, double-quoted Lua code).
+    local cmdline = table.concat({
+      "nohup '" .. rex_cli .. "'",
+      "do",
+      "-s '" .. ctx.session_id .. "'",
+      "-e '" ..
+        watcher_code(layer.block_ids[1], ctx.session_id, source_block, window) .. "'",
+      ">/dev/null 2>&1 &",
+    }, " ")
+    pcall(rex.exec, { "/bin/sh", "-c", cmdline })
     return { layer_id = layer.layer_id, block_ids = layer.block_ids, source_block = source_block }
   end,
 }
