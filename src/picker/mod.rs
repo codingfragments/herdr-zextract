@@ -1405,11 +1405,7 @@ mod grab_label_tests {
             None,
             initial_grab_name,
             None,
-            crate::grab::GrabTarget {
-                socket_path: "/tmp/socket".to_string(),
-                focused_pane_id: "pane1".to_string(),
-                tab_id: "tab1".to_string(),
-            },
+            std::rc::Rc::new(crate::host::fake::FakeHost::new("pane1", "tab1")),
         );
         State::new(LaunchArgs {
             matches: Vec::new(),
@@ -1480,11 +1476,7 @@ mod freshness_tests {
             None,
             "quick",
             None,
-            crate::grab::GrabTarget {
-                socket_path: "/tmp/socket".to_string(),
-                focused_pane_id: "pane1".to_string(),
-                tab_id: "tab1".to_string(),
-            },
+            std::rc::Rc::new(crate::host::fake::FakeHost::new("pane1", "tab1")),
         );
         State::new(LaunchArgs {
             matches,

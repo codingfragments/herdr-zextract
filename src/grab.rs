@@ -3,14 +3,15 @@
 //! `source = "tab"` variant. See `doc/multi-pane-grab.md` for the full
 //! design-decisions table this follows.
 //!
-//! Unlike the original, Herdr has no floating-pane concept and plugin
-//! popups never appear in `pane.list` (confirmed live) - so "every
-//! non-floating, non-plugin pane on the active tab" reduces to simply
-//! every pane `pane.list` returns for that tab, no extra filtering.
+//! All multiplexer access goes through [`crate::host::Host`]: which
+//! panes count as "on the tab" (and that floating/popup panes are left
+//! out) is the host's business, not this module's.
 
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 use crate::config::Config;
+use crate::host::{Host, ReadSource};
 use crate::matcher::{self, Match};
 
 /// The five grab profiles with built-in Rust-side definitions, in the
@@ -89,7 +90,7 @@ pub struct PaneCapture {
 /// names dropped), falling back to the full list when the restriction
 /// names nothing known - a typo in `grab_cycle` degrades to today's
 /// cycle-everything behavior instead of leaving nothing to cycle
-/// through. Pure, for unit testing without a socket.
+/// through. Pure, for unit testing without a host.
 fn resolve_cycle_names(all: Vec<String>, cycle: Option<&[String]>) -> Vec<String> {
     match cycle {
         Some(list) => {
@@ -118,23 +119,14 @@ pub struct GrabCycler {
     /// grab profile's own `disable` list (if any) gets merged in varies.
     disabled_sets: Vec<HashSet<String>>,
     current: usize,
-    socket_path: String,
-    focused_pane_id: String,
-    tab_id: String,
+    /// The multiplexer to capture from; shared with `main.rs`, which
+    /// still needs it for Insert after the picker (which owns this
+    /// cycler) has returned.
+    host: Rc<dyn Host>,
     /// Clone of the launch `Config`, so re-extraction sees the same
     /// `custom` patterns/etc. as the initial capture - `disabled` is
     /// overwritten per call from `disabled_sets`, never read from here.
     config_template: Config,
-}
-
-/// Static launch context for a [`GrabCycler`]: the socket to talk to
-/// and the pane/tab identity to capture. Bundled so `GrabCycler::new`
-/// stays under clippy's `too_many_arguments` threshold (same pattern
-/// as the picker's `LaunchArgs`).
-pub struct GrabTarget {
-    pub socket_path: String,
-    pub focused_pane_id: String,
-    pub tab_id: String,
 }
 
 impl GrabCycler {
@@ -148,20 +140,16 @@ impl GrabCycler {
     /// starts there (falling back to index 0 if unrecognized) and wraps
     /// forward from there. `cycle` is the launching profile's
     /// `grab_cycle` restriction - `None` cycles through every
-    /// configured grab profile.
+    /// configured grab profile. `host` supplies the source pane/tab
+    /// and does the actual reads.
     pub fn new(
         config: &Config,
         raw_disabled: &HashSet<String>,
         allowed: Option<&HashSet<String>>,
         initial_name: &str,
         cycle: Option<&[String]>,
-        target: GrabTarget,
+        host: Rc<dyn Host>,
     ) -> Self {
-        let GrabTarget {
-            socket_path,
-            focused_pane_id,
-            tab_id,
-        } = target;
         let names = resolve_cycle_names(config.cycle_grab_profile_names(), cycle);
         let profiles: Vec<ResolvedGrabProfile> = names
             .iter()
@@ -177,9 +165,7 @@ impl GrabCycler {
             profiles,
             disabled_sets,
             current,
-            socket_path,
-            focused_pane_id,
-            tab_id,
+            host,
             config_template: config.clone(),
         }
     }
@@ -203,7 +189,7 @@ impl GrabCycler {
     }
 
     /// Capture + extract with the next grabber in the cycle (wrapping
-    /// around), advancing `current` only on success - a socket failure
+    /// around), advancing `current` only on success - a host failure
     /// leaves the picker's existing matches and displayed grabber name
     /// untouched rather than clearing the list.
     pub fn cycle_next(&mut self) -> Result<CaptureResult, String> {
@@ -215,12 +201,7 @@ impl GrabCycler {
 
     fn capture_and_extract(&self, index: usize) -> Result<CaptureResult, String> {
         let profile = &self.profiles[index];
-        let captures = capture(
-            profile,
-            &self.socket_path,
-            &self.focused_pane_id,
-            &self.tab_id,
-        )?;
+        let captures = capture(profile, self.host.as_ref())?;
         let multi_pane = captures.len() > 1;
         let mut config = self.config_template.clone();
         config.disabled = self.disabled_sets[index].clone();
@@ -260,25 +241,21 @@ pub struct CaptureResult {
     pub pane_texts: HashMap<String, String>,
 }
 
-/// Capture scrollback per `profile`. `focused_pane_id`/`tab_id` come
-/// from the launch context (`HERDR_PLUGIN_CONTEXT_JSON`).
-pub fn capture(
-    profile: &ResolvedGrabProfile,
-    socket_path: &str,
-    focused_pane_id: &str,
-    tab_id: &str,
-) -> Result<Vec<PaneCapture>, String> {
+/// Capture per `profile` from the host's source pane - or, for a
+/// `tab` profile, from every pane on the source tab.
+pub fn capture(profile: &ResolvedGrabProfile, host: &dyn Host) -> Result<Vec<PaneCapture>, String> {
+    let source_pane = &host.source().pane_id;
     match profile.source {
-        GrabSource::Tab => capture_tab(socket_path, focused_pane_id, tab_id, profile.lines),
-        _ => {
+        GrabSource::Tab => capture_tab(host, profile.lines),
+        GrabSource::Viewport | GrabSource::Scrollback => {
             let source = if profile.source == GrabSource::Viewport {
-                "visible"
+                ReadSource::Viewport
             } else {
-                "recent_unwrapped"
+                ReadSource::Scrollback
             };
-            let text = read_pane(socket_path, focused_pane_id, source, profile.lines)?;
+            let text = host.read_pane(source_pane, source, profile.lines)?;
             Ok(vec![PaneCapture {
-                pane_id: focused_pane_id.to_string(),
+                pane_id: source_pane.clone(),
                 title: String::new(),
                 text,
             }])
@@ -286,77 +263,18 @@ pub fn capture(
     }
 }
 
-fn read_pane(
-    socket_path: &str,
-    pane_id: &str,
-    source: &str,
-    lines: Option<u32>,
-) -> Result<String, String> {
-    let mut params = serde_json::json!({"pane_id": pane_id, "source": source});
-    if let Some(n) = lines {
-        params["lines"] = serde_json::json!(n);
-    }
-    let result = crate::socket_client::request(socket_path, "pane.read", params)
-        .map_err(|e| format!("pane.read failed: {e}"))?;
-    result
-        .get("read")
-        .and_then(|v| v.get("text"))
-        .and_then(|v| v.as_str())
-        .map(str::to_string)
-        .ok_or_else(|| "pane.read response had no \"read.text\" field".to_string())
-}
-
-fn pane_title(pane: &serde_json::Value) -> String {
-    pane.get("label")
-        .and_then(|v| v.as_str())
-        .filter(|s| !s.is_empty())
-        .or_else(|| {
-            pane.get("terminal_title_stripped")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty())
-        })
-        .map(str::to_string)
-        .unwrap_or_else(|| {
-            let id = pane.get("pane_id").and_then(|v| v.as_str()).unwrap_or("?");
-            format!("pane {id}")
-        })
-}
-
-/// Every pane on `tab_id`, last-focused pane first (matching the
-/// original's ordering), remaining panes in `pane.list`'s own order.
-/// Panes whose scrollback can't be fetched (closed mid-grab) are
-/// skipped silently, per the original's failure-handling rule.
-fn capture_tab(
-    socket_path: &str,
-    focused_pane_id: &str,
-    tab_id: &str,
-    lines: Option<u32>,
-) -> Result<Vec<PaneCapture>, String> {
-    let result = crate::socket_client::request(socket_path, "pane.list", serde_json::json!({}))
-        .map_err(|e| format!("pane.list failed: {e}"))?;
-    let panes = result
-        .get("panes")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default();
-
-    let mut on_tab: Vec<serde_json::Value> = panes
-        .into_iter()
-        .filter(|p| p.get("tab_id").and_then(|v| v.as_str()) == Some(tab_id))
-        .collect();
-    on_tab.sort_by_key(|p| p.get("pane_id").and_then(|v| v.as_str()) != Some(focused_pane_id));
-
+/// Every pane on the source tab, in the host's order (source pane
+/// first). Panes whose scrollback can't be fetched (closed mid-grab)
+/// are skipped silently, per the original's failure-handling rule.
+fn capture_tab(host: &dyn Host, lines: Option<u32>) -> Result<Vec<PaneCapture>, String> {
     let mut out = Vec::new();
-    for pane in &on_tab {
-        let Some(pane_id) = pane.get("pane_id").and_then(|v| v.as_str()) else {
-            continue;
-        };
-        let Ok(text) = read_pane(socket_path, pane_id, "recent_unwrapped", lines) else {
+    for pane in host.list_tab_panes()? {
+        let Ok(text) = host.read_pane(&pane.pane_id, ReadSource::Scrollback, lines) else {
             continue;
         };
         out.push(PaneCapture {
-            pane_id: pane_id.to_string(),
-            title: pane_title(pane),
+            pane_id: pane.pane_id,
+            title: pane.title,
             text,
         });
     }
@@ -367,12 +285,10 @@ fn capture_tab(
 mod tests {
     use super::*;
 
-    fn target() -> GrabTarget {
-        GrabTarget {
-            socket_path: "/tmp/socket".to_string(),
-            focused_pane_id: "pane1".to_string(),
-            tab_id: "tab1".to_string(),
-        }
+    use crate::host::fake::{FakeHost, ReadCall};
+
+    fn target() -> Rc<dyn Host> {
+        Rc::new(FakeHost::new("pane1", "tab1"))
     }
 
     fn cycler(config: &Config, initial_name: &str) -> GrabCycler {
@@ -490,21 +406,86 @@ mod tests {
         assert_eq!(GrabSource::parse("bogus"), GrabSource::Scrollback);
     }
 
-    #[test]
-    fn pane_title_prefers_label() {
-        let pane = serde_json::json!({"pane_id": "w1:p1", "label": "editor", "terminal_title_stripped": "nvim"});
-        assert_eq!(pane_title(&pane), "editor");
+    fn profile(source: GrabSource, lines: Option<u32>) -> ResolvedGrabProfile {
+        ResolvedGrabProfile {
+            source,
+            lines,
+            disable: Vec::new(),
+        }
     }
 
     #[test]
-    fn pane_title_falls_back_to_terminal_title() {
-        let pane = serde_json::json!({"pane_id": "w1:p1", "terminal_title_stripped": "nvim"});
-        assert_eq!(pane_title(&pane), "nvim");
+    fn capture_scrollback_reads_the_source_pane_with_the_line_cap() {
+        let host = FakeHost::new("p1", "t1")
+            .with_pane("p1", "one", "hello")
+            .with_pane("p2", "two", "other");
+        let caps = capture(&profile(GrabSource::Scrollback, Some(150)), &host).unwrap();
+        assert_eq!(caps.len(), 1);
+        assert_eq!(caps[0].pane_id, "p1");
+        assert_eq!(caps[0].title, "");
+        assert_eq!(caps[0].text, "hello");
+        assert_eq!(
+            host.reads.borrow().as_slice(),
+            &[ReadCall {
+                pane_id: "p1".into(),
+                source: ReadSource::Scrollback,
+                lines: Some(150)
+            }]
+        );
     }
 
     #[test]
-    fn pane_title_falls_back_to_pane_id() {
-        let pane = serde_json::json!({"pane_id": "w1:p1"});
-        assert_eq!(pane_title(&pane), "pane w1:p1");
+    fn capture_viewport_reads_the_viewport() {
+        let host = FakeHost::new("p1", "t1").with_pane("p1", "one", "screen");
+        capture(&profile(GrabSource::Viewport, None), &host).unwrap();
+        assert_eq!(host.reads.borrow()[0].source, ReadSource::Viewport);
+        assert_eq!(host.reads.borrow()[0].lines, None);
+    }
+
+    #[test]
+    fn capture_source_read_failure_is_an_error() {
+        let host = FakeHost::new("gone", "t1");
+        assert!(capture(&profile(GrabSource::Scrollback, None), &host).is_err());
+    }
+
+    #[test]
+    fn capture_tab_reads_every_listed_pane_and_skips_unreadable_ones() {
+        let mut host = FakeHost::new("p2", "t1")
+            .with_pane("p2", "editor", "two")
+            .with_pane("p1", "shell", "one");
+        // Listed on the tab but unreadable (closed mid-grab).
+        host.tab.push(crate::host::PaneInfo {
+            pane_id: "p3".into(),
+            title: "gone".into(),
+        });
+        let caps = capture(&profile(GrabSource::Tab, Some(150)), &host).unwrap();
+        let got: Vec<(&str, &str, &str)> = caps
+            .iter()
+            .map(|c| (c.pane_id.as_str(), c.title.as_str(), c.text.as_str()))
+            .collect();
+        assert_eq!(got, vec![("p2", "editor", "two"), ("p1", "shell", "one")]);
+        assert!(host
+            .reads
+            .borrow()
+            .iter()
+            .all(|r| r.source == ReadSource::Scrollback && r.lines == Some(150)));
+    }
+
+    #[test]
+    fn grab_cycler_tags_matches_with_their_pane() {
+        let host: Rc<dyn Host> = Rc::new(
+            FakeHost::new("p1", "t1")
+                .with_pane("p1", "one", "see https://example.com/a")
+                .with_pane("p2", "two", "and https://example.com/b"),
+        );
+        let config = Config::default();
+        let c = GrabCycler::new(&config, &HashSet::new(), None, "tab-scan", None, host);
+        let result = c.capture_current().unwrap();
+        assert!(!result.matches.is_empty());
+        assert!(result
+            .matches
+            .iter()
+            .all(|m| m.fields.contains_key("__pane_id") && m.fields.contains_key("__pane_title")));
+        assert_eq!(result.pane_texts.len(), 2);
     }
 }

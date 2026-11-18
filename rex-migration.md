@@ -1,6 +1,6 @@
 # Rex migration plan — one binary, two hosts
 
-> **Status: planned, not started.** This is the active plan for this repo.
+> **Status: Phase 1 implemented (PR pending); Phase 2 next.** This is the active plan for this repo.
 > Agents: read this file before starting work, follow the phases in order
 > (one `phase/rex-N-…` branch + PR per phase, see CLAUDE.md gitflow), and
 > tick the checkboxes / update the "Status" lines as phases land.
@@ -100,28 +100,35 @@ is a copy, not a rewrite:
 
 ### Phase 1 — `Host` trait + `HerdrHost` (pure refactor) — `phase/rex-1-host-trait`
 
-Status: ☐ not started
+Status: ☑ implemented on `phase/rex-1-host-trait` (PR pending)
 
-- [ ] New `src/host/mod.rs`:
-  ```rust
-  pub trait Host {
-      fn name(&self) -> &'static str;               // "herdr" | "rex"
-      fn source(&self) -> &SourceRef;               // source pane/block + tab/window
-      fn read_pane(&self, pane: &str, src: ReadSource, lines: Option<u32>) -> Result<String, String>;
-      fn list_tab_panes(&self) -> Result<Vec<PaneInfo>, String>; // focused first
-      fn insert_text(&self, pane: &str, text: &str) -> Result<(), String>;
-  }
-  ```
-  `ReadSource = Viewport | Scrollback` (maps herdr `visible` / `recent_unwrapped`).
-- [ ] `src/host/herdr.rs`: move `socket_client` use, `launch_context`,
-  `read_pane`, `pane_title`, `capture_tab` filtering, `insert_text` here.
-- [ ] `grab.rs` / `GrabCycler` / `GrabTarget` take `&dyn Host` (or
-  `Box<dyn Host>`) instead of `socket_path` + ids. `actions::dispatch`
-  gets the host for Insert.
-- [ ] `main.rs`: `host::detect("ZEXTRACT")` → `HerdrHost` (only backend so far).
-- [ ] No behavior change; `cargo test`, `just check` green; existing grab
-  tests ported to a `FakeHost` (makes grab logic unit-testable without a
-  socket — a nice side win).
+- [x] New `src/host/mod.rs`: `Host` trait (`name`, `source`, `read_pane`,
+  `list_tab_panes`, `insert_text`), `SourceRef { pane_id, tab_id }`,
+  `PaneInfo { pane_id, title }`, `ReadSource = Viewport | Scrollback`
+  (`#[non_exhaustive]`, maps herdr `visible` / `recent_unwrapped`), and
+  `detect(prefix)`. No `ReadFormat` parameter yet: flash adds colored
+  reads when it creates `muxhost`; the non-exhaustive enum keeps that
+  addition cheap.
+- [x] `src/host/herdr.rs`: `launch_context` (now pure, env values passed
+  in), `read_pane`, `pane_title`, the tab filter + source-first ordering
+  (`panes_on_tab`) and `insert_text`. `socket_client.rs` moved to
+  `src/host/` and is private to the module; its request id now uses
+  `CARGO_PKG_NAME` instead of a hard-coded `herdr-zextract`.
+- [x] `grab.rs`: `GrabTarget` is gone; `GrabCycler::new` takes
+  `Rc<dyn Host>` (shared with `main.rs`, which still needs the host for
+  Insert after the picker, which owns the cycler, returns).
+  `capture(profile, &dyn Host)`. `actions::dispatch` / `execute_batch`
+  take `&dyn Host`; Insert targets `host.source().pane_id`.
+- [x] `main.rs`: `host::detect("ZEXTRACT")` → `HerdrHost` (`ZEXTRACT_HOST=herdr`
+  explicit, else `HERDR_SOCKET_PATH`); debug log line names the host.
+- [x] No behavior change: error messages unchanged (`grab failed: pane.read
+  failed: …`, `insert failed: …`). `just check` green (297 tests; new
+  `FakeHost` in `src/host/fake.rs` with tests for capture, tab capture,
+  pane tagging, insert, launch context, tab filtering). Checked live
+  against a running herdr: `open` and `tab` profiles capture and reach
+  the picker; a bad socket still fails at the grab.
+- [x] `src/host/` is self-contained (no `crate::` imports), ready to move
+  into `muxhost`.
 
 ### Phase 2 — neutral config location — `phase/rex-2-config-path`
 
