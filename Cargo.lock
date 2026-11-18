@@ -585,6 +585,7 @@ version = "0.7.0"
 dependencies = [
  "arboard",
  "crossterm",
+ "muxhost",
  "nucleo-matcher",
  "ratatui",
  "regex-lite",
@@ -824,6 +825,15 @@ checksum = "bb85c154ba489f01b25c0d36ae69a87e4a1c73a72631fc6c0eb6dde34a73e44b"
 dependencies = [
  "num-traits",
  "pxfm",
+]
+
+[[package]]
+name = "muxhost"
+version = "0.1.0"
+source = "git+https://github.com/codingfragments/muxhost?tag=v0.1.0#e7acc7d8f337765961ee7388df8b9c67b040e996"
+dependencies = [
+ "arboard",
+ "serde_json",
 ]
 
 [[package]]

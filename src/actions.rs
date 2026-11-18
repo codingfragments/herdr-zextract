@@ -23,8 +23,8 @@
 use std::process::Command;
 
 use crate::config::Config;
-use crate::host::Host;
 use crate::matcher::{Match, MatchType};
+use muxhost::Host;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Verb {
@@ -344,7 +344,7 @@ fn join<'a>(matches: &[&'a Match], f: impl Fn(&'a Match) -> &'a String, sep: &st
 }
 
 fn copy_to_clipboard(text: &str) -> Outcome {
-    match crate::host::clipboard::copy(text) {
+    match muxhost::clipboard::copy(text) {
         Ok(()) => Outcome::Done(format!("copied: {text}")),
         Err(e) => Outcome::Failed(format!("copy failed: {e}")),
     }
@@ -615,7 +615,7 @@ mod tests {
 
     #[test]
     fn insert_types_into_the_hosts_source_pane() {
-        let host = crate::host::fake::FakeHost::new("w1:p2", "w1:t1");
+        let host = muxhost::fake::FakeHost::new("w1:p2", "w1:t1");
         let url = m(MatchType::Url, "https://example.com");
         match dispatch(Verb::Insert, &url, &host, &Config::default()) {
             Outcome::Done(msg) => assert_eq!(msg, "inserted into w1:p2: https://example.com"),
@@ -629,7 +629,7 @@ mod tests {
 
     #[test]
     fn batch_insert_joins_with_spaces_into_one_insert() {
-        let host = crate::host::fake::FakeHost::new("p1", "t1");
+        let host = muxhost::fake::FakeHost::new("p1", "t1");
         let a = m(MatchType::Uuid, "a");
         let b = m(MatchType::Uuid, "b");
         let refs = vec![&a, &b];
@@ -645,7 +645,7 @@ mod tests {
 
     #[test]
     fn insert_failure_is_reported() {
-        let mut host = crate::host::fake::FakeHost::new("p1", "t1");
+        let mut host = muxhost::fake::FakeHost::new("p1", "t1");
         host.insert_error = Some("herdr socket error: gone".into());
         let url = m(MatchType::Url, "https://example.com");
         match dispatch(Verb::Insert, &url, &host, &Config::default()) {

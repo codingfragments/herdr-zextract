@@ -1,8 +1,9 @@
 # Rex migration plan — one binary, two hosts
 
-> **Status: complete — v0.7.0 released and live under herdr and Rex
-> (2026-11-18).** This plan is done; it stays as the record and the
-> reference for the sister repos (flash, nav) that follow it.
+> **Status: complete — v0.7.0 released and live under herdr and Rex;
+> v0.7.1 moves the host layer to the shared `muxhost` crate (extracted
+> from this repo's `src/host/`).** This plan stays as the record and
+> the reference for the sister repos (flash, nav) that follow it.
 > Agents: read this file before starting work, follow the phases in order
 > (one `phase/rex-N-…` branch + PR per phase, see CLAUDE.md gitflow), and
 > tick the checkboxes / update the "Status" lines as phases land.
