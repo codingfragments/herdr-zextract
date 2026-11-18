@@ -1,6 +1,8 @@
 # Rex migration plan — one binary, two hosts
 
-> **Status: Phases 1–4 done (Phase 4 PR pending); Phase 5 next.** This is the active plan for this repo.
+> **Status: complete — v0.7.0 released and live under herdr and Rex
+> (2026-11-18).** This plan is done; it stays as the record and the
+> reference for the sister repos (flash, nav) that follow it.
 > Agents: read this file before starting work, follow the phases in order
 > (one `phase/rex-N-…` branch + PR per phase, see CLAUDE.md gitflow), and
 > tick the checkboxes / update the "Status" lines as phases land.
@@ -252,8 +254,7 @@ checks left for the user, see the end of this section)
 
 ### Phase 4 — Rex launcher (`zextract.lua`) — `phase/rex-4-lua-launcher`
 
-Status: ☑ implemented and live-tested on `phase/rex-4-lua-launcher`
-(PR pending)
+Status: ☑ done (PR #42, live in the user's Rex config)
 
 - [x] `rex/zextract.lua`: self-contained launcher; uses `lib.env`
   (login PATH, `rex_cli`) when present, else inline fallbacks (default
@@ -289,33 +290,43 @@ Status: ☑ implemented and live-tested on `phase/rex-4-lua-launcher`
 
 ### Phase 5 — distribution polish — `phase/rex-5-distribution`
 
-Status: ☐ not started
+Status: ☑ done (2026-11-18, folded into the v0.7.0 close-out)
 
-- [ ] Rolling `latest` tag/release: **keep it** (option B). `herdr plugin
-  install --ref latest` (`just install`) still uses it, and
-  `bin/fetch-binary` resolves the binary from the version in that
-  ref's `Cargo.toml`, so it gets the matching release. mise lists
-  `latest` as a version, so document "pin exact versions in mise"
-  instead of using `= "latest"`.
-- [ ] Verify `mise use -g github:codingfragments/herdr-zextract@<ver>` on
-  macOS arm64 and one Linux host picks the right asset and the binary
-  name inside the tarball (`herdr-zextract`).
-- [ ] README Install section rewritten: "Herdr" (`herdr plugin install`,
-  no Rust needed for tagged versions) and "Rex" (mise), with
-  `cargo install --git` as the source fallback.
-- [ ] Optional, later: rename binary/repo to `zextract` (GitHub
-  redirects; mise tool id changes once). Not part of this migration.
+- [x] Rolling `latest` tag/release: **kept** (option B) — `herdr plugin
+  install --ref latest` / `just install` still use it, and
+  `bin/fetch-binary` resolves the matching release from the ref's
+  `Cargo.toml`. mise configs pin exact versions.
+- [x] `mise use -g github:codingfragments/herdr-zextract@0.7.0` on
+  macOS arm64: installed the right asset
+  (`herdr-zextract-aarch64-apple-darwin.tar.gz`), `herdr-zextract
+  --version` → 0.7.0, pinned in the user's dotfiles mise config. The
+  dev symlink at `~/.local/bin/herdr-zextract` was removed; the Rex
+  launcher's preflight resolves the binary via the mise shims on the
+  login PATH. One Linux host still worth checking later.
+- [x] README Install section: herdr / Rex / from source (done with
+  Phase 3/4).
 
 ### Phase 6 — release `v0.7.0` — `release/0.7.0`
 
-Status: ☐ not started
+Status: ☑ done (2026-11-18)
 
-- [ ] Version bump + CHANGELOG ("Rex support", "neutral config path",
-  "herdr plugin install downloads the release binary"), tag per CLAUDE.md
-  release process.
-- [ ] Update the user's Rex `migration-plan.md`
-  (`~/.config/rex/migration-plan.md`, dotfiles repo — separate PR there):
-  move zextract from "impossible" to "done".
+- [x] Release PR #43 (version bump, CHANGELOG), merged; tag `v0.7.0`
+  pushed (re-pointed at the runner-fix commits).
+- [x] **Workflows:** GitHub retired the `macos-14` image mid-release
+  (`The configuration 'macos-14-arm64-us-default' is not supported`,
+  fixed in #44 with `macos-latest`), then arm64 capacity made even
+  `macos-latest` jobs unacquirable — the user migrated both workflows
+  to **Blacksmith runners** (#45: `blacksmith-6vcpu-macos-15`,
+  `blacksmith-4vcpu-ubuntu-2604`, `blacksmith-4vcpu-ubuntu-2404-arm`).
+  macOS release build: 15+ min of failed queuing → 38 s.
+- [x] Release published: v0.7.0 + rolling `latest`, 6 assets
+  (3 targets × binary + sha256).
+- [x] `bin/fetch-binary` verified for real: `herdr plugin install
+  codingfragments/herdr-zextract --ref v0.7.0 --yes` downloaded the
+  release binary into the plugin checkout's `target/release/` (no Rust
+  toolchain); the popup opens via `bin/zextract-launch`.
+- [x] The user's Rex `migration-plan.md` (dotfiles) updated: zextract
+  moved from "impossible" to "done".
 
 ## Spike checklist (answer early, record results here)
 
