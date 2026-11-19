@@ -181,8 +181,8 @@ Status: ☑ done (PR #39)
 
 ### Phase 3 — `RexHost` + host detection — `phase/rex-3-rex-host`
 
-Status: ☑ implemented on `phase/rex-3-rex-host` (PR pending; two live
-checks left for the user, see the end of this section)
+Status: ☑ done (PR #41, released in v0.7.0). The two herdr install
+checks at the end of this section were never recorded as confirmed.
 
 - [x] `src/host/rex.rs`, all calls through the `rex` CLI (`$REX_CLI`,
   default `rex`) behind a small `RexRunner` trait (tests use a fake that
@@ -351,7 +351,7 @@ Status: ☑ done (2026-11-18)
 | S1 | After the floating layer closes, does focus return to the source block (so `rex send` lands where the user expects)? | ☑ 2026-11, Phase 4 live test: yes |
 | S2 | Does Rex pass OSC 52 from a floating-layer terminal to the macOS clipboard (local and remote host)? | ☐ |
 | S3 | `rex capture --unwrap` vs herdr `recent_unwrapped`: same line semantics for freshness/offsets? Size/latency on ~100k lines? | ☐ |
-| S4 | `session inspect --json` shape: how to tell floating-layer blocks from window blocks; where are block labels/titles? | ☐ |
+| S4 | `session inspect --json` shape: how to tell floating-layer blocks from window blocks; where are block labels/titles? || ☑ 2026-11, answered in muxhost (`doc/hosts.md`, `doc/topology.md`): floating-layer blocks sit in layers with `kind != "tiled"`; labels come from `session.view`/`block ls` (Rex labels new blocks `shell`), terminal titles from `block call … title` |
 | S5 | Does herdr's popup inherit a PATH that contains mise installs (`herdr-plugin.toml` with bare `herdr-zextract`)? | ☑ 2026-11: yes on the user's Mac — the herdr server processes carry the login PATH incl. `~/.local/share/mise/shims`, so later `mise use -g` installs are found without restarting herdr. Now only relevant for `zextract-launch`'s PATH fallback (option B). |
 | S6 | Remote Rex session: popup runs on the remote host — `open`/`edit`/`reveal` act there. Acceptable, or gate verbs by host? | ☐ |
 | S7 | mise github backend picks `herdr-zextract-<triple>.tar.gz` correctly on all three targets | ☐ |
