@@ -5,6 +5,21 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.2] - 2026-11-19
+
+### Changed
+
+- Shared host layer updated from [`muxhost`](https://github.com/codingfragments/muxhost)
+  v0.1.0 to v0.3.6. Nothing zextract uses changed in its core API, so
+  there is no behaviour change on herdr or Rex; it picks up the Rex-side
+  fixes the shared layer gained since (block calls scoped to the block's
+  own session, label-before-terminal-title pane names).
+
+### Added
+
+- Docs: `doc/types.md`, `doc/patterns.md` and `doc/use-cases.md`
+  (the type and pattern references, with worked scenarios).
+
 ## [0.7.1] - 2026-11-19
 
 ### Changed
