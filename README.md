@@ -70,7 +70,10 @@ profile's actual grab scope and pattern filter live in your own
 in the plugin's packaging. Full binding reference, including the
 `customN` slots and how to add an eleventh action:
 [`doc/keybinding.md`](doc/keybinding.md). The one env var involved:
-[`doc/env-vars.md`](doc/env-vars.md).
+[`doc/env-vars.md`](doc/env-vars.md). The matching layer is documented
+in [`doc/types.md`](doc/types.md) (the twelve built-in `#tags`) and
+[`doc/patterns.md`](doc/patterns.md) (what each one matches); worked
+scenarios in [`doc/use-cases.md`](doc/use-cases.md).
 
 ## Build
 
