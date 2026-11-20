@@ -118,11 +118,25 @@ For a local checkout: `just link` (builds, then `herdr plugin link .`;
 
 ### Rex
 
-The same binary, installed with
-`mise use -g github:codingfragments/herdr-zextract`, plus the Lua
-launcher from [`rex/zextract.lua`](rex/zextract.lua) in your Rex config
-(bindings `ctrl+s>f/F/u/U`). Full guide:
-[`doc/rex.md`](doc/rex.md).
+The same binary, no plugin manifest: three things go in your Rex
+config. Details in [`doc/rex.md`](doc/rex.md):
+
+1. **The binary:** `mise use -g github:codingfragments/herdr-zextract`.
+2. **The launcher:** copy [`rex/zextract.lua`](rex/zextract.lua) to
+   `~/.config/rex/plugins/zextract.lua` and add
+   `require("plugins.zextract")` to `init.lua` (binding `ctrl+s>f/F/u/U`).
+3. **The environment:** the Rex server starts with a minimal `PATH`
+   (`/usr/bin:/bin:/usr/sbin:/sbin`: no Homebrew, no mise shims). The
+   launcher finds the `rex` CLI by itself on a standard install, but
+   **not a binary installed with mise** — for that, add a
+   `~/.config/rex/lib/env.lua` that exports your login `PATH` (and,
+   optionally, the `rex` CLI path). Without it the popup says
+   `herdr-zextract not found on this host` even though the tool is installed.
+   A copyable sample, a check command and troubleshooting:
+   [Environment in `doc/rex.md`](doc/rex.md#environment-the-rex-cli-and-your-login-path).
+
+Reload the config afterwards (`ctrl+s>shift+r`); `lib/env.lua` is only
+read when the config loads.
 
 ### From source
 
