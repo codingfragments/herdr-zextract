@@ -44,8 +44,10 @@ require("plugins.zextract")
 ```
 
 The launcher uses `lib/env.lua` (login PATH, rex CLI path) when your
-config has it and falls back to inline defaults otherwise. Reload your
-config (`ctrl+s>shift+r`).
+config has it and falls back to inline defaults otherwise; a binary
+installed with mise is only found with that file, see
+[Environment](#environment-the-rex-cli-and-your-login-path) below.
+Reload your config (`ctrl+s>shift+r`).
 
 **3. Config** — one file serves both hosts:
 `~/.config/zextract/config.toml` (see
@@ -53,6 +55,36 @@ config (`ctrl+s>shift+r`).
 override `[ui]`/`[actions]` for Rex only. The herdr location
 (`herdr plugin config-dir herdr-zextract`) is still read as a fallback
 when running under herdr.
+
+## Environment: the `rex` CLI and your login PATH
+
+The launcher needs two things from your Rex config, because the Rex
+server is started by the macOS app with a minimal `PATH`
+(`/usr/bin:/bin:/usr/sbin:/sbin`, no Homebrew, no mise shims):
+
+| It needs | Without it |
+|---|---|
+| the **`rex` CLI's absolute path** | the popup opens, but `herdr-zextract` cannot call back into Rex |
+| a **login `PATH`** that contains `herdr-zextract` | the popup says `zextract: herdr-zextract not found on this host` |
+
+On a standard macOS install the CLI is found with no setup (the launcher
+falls back to the app bundle under your own `$HOME`). Its fallback
+`PATH`, though, has **no mise shims and no `~/.local/bin`**, so a binary
+installed with `mise use -g` is **not found until you add a
+`~/.config/rex/lib/env.lua`**. One file serves every Rex launcher:
+
+```sh
+mkdir -p ~/.config/rex/lib
+curl -fsSL https://raw.githubusercontent.com/codingfragments/muxhost/main/examples/rex/lib/env.lua \
+  -o ~/.config/rex/lib/env.lua
+```
+
+That sample finds the CLI and asks your login shell (fish, zsh, bash, …)
+for its `PATH`, with nothing tied to an account or a home directory. To
+pin values by hand instead, to check what it resolves to, or to
+troubleshoot, see the muxhost guide:
+[The Rex environment for launchers](https://github.com/codingfragments/muxhost/blob/main/doc/rex-environment.md).
+Reload your config afterwards (`ctrl+s>shift+r`).
 
 ## Bindings
 
