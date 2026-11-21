@@ -50,7 +50,7 @@ installed with mise is only found with that file, see
 Reload your config (`ctrl+s>shift+r`).
 
 **3. Config** — one file serves both hosts:
-`~/.config/zextract/config.toml` (see
+`~/.config/cf-zextract/config.toml` (see
 [`config-reference.md`](config-reference.md)). A `[host.rex]` table can
 override `[ui]`/`[actions]` for Rex only. The herdr location
 (`herdr plugin config-dir herdr-zextract`) is still read as a fallback

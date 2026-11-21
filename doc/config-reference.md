@@ -6,8 +6,8 @@ first of these that exists wins:
 
 1. `$ZEXTRACT_CONFIG` — an explicit file. When set, it is the only
    place looked at (no fallback), and `Ctrl-W` writes there.
-2. `$XDG_CONFIG_HOME/zextract/config.toml` (absolute `XDG_CONFIG_HOME`
-   only), else `~/.config/zextract/config.toml` — the normal location,
+2. `$XDG_CONFIG_HOME/cf-zextract/config.toml` (absolute `XDG_CONFIG_HOME`
+   only), else `~/.config/cf-zextract/config.toml` — the normal location,
    shared by every multiplexer the plugin runs under.
 3. `$HERDR_PLUGIN_CONFIG_DIR/config.toml` — the legacy herdr location
    (`herdr plugin config-dir herdr-zextract`), read as a fallback so

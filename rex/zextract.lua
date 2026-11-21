@@ -12,7 +12,7 @@
 --   ctrl+s>shift+f  profile "tab"    (whole tab)
 --   ctrl+s>u        profile "url"    (current pane, URLs/IPs only)
 --   ctrl+s>shift+u  profile "url-tab"
--- Profiles live in ~/.config/zextract/config.toml under [profiles.<n>]
+-- Profiles live in ~/.config/cf-zextract/config.toml under [profiles.<n>]
 -- (https://github.com/codingfragments/herdr-zextract, doc/config-reference.md).
 --
 -- Self-contained: uses lib.env (login PATH, rex CLI path) when present
@@ -103,7 +103,7 @@ end
 rex.action{
   name  = "zextract",
   title = "zextract",
-  description = "Open zextract over the focused pane: fuzzy-find and act on URLs, paths, commands and more in its scrollback. Optional profile (grab scope/type filter) from ~/.config/zextract/config.toml.",
+  description = "Open zextract over the focused pane: fuzzy-find and act on URLs, paths, commands and more in its scrollback. Optional profile (grab scope/type filter) from ~/.config/cf-zextract/config.toml.",
   args  = { profile = "string?" },
   run   = function(ctx, args)
     -- The source pane: what the user is looking at, read BEFORE the
