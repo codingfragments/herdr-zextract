@@ -1,6 +1,6 @@
 //! User config, loaded once at startup from the first config file that
 //! exists (see [`locate`]): `$ZEXTRACT_CONFIG`, else
-//! `$XDG_CONFIG_HOME/zextract/config.toml` (`~/.config/zextract/config.toml`),
+//! `$XDG_CONFIG_HOME/cf-zextract/config.toml` (`~/.config/cf-zextract/config.toml`),
 //! else the legacy herdr location `$HERDR_PLUGIN_CONFIG_DIR/config.toml`.
 //! Optional `[host.<name>]` tables override `[ui]`/`[actions]` for one
 //! multiplexer host (see [`apply_host_overrides`]). Ports the built-in-tuning and
@@ -780,9 +780,9 @@ impl ConfigEnv {
 /// Config lookup:
 /// 1. `explicit` (`$ZEXTRACT_CONFIG`) - used as given; no fallback, so
 ///    a missing explicit file means "no config" (and `Ctrl-W` writes it).
-/// 2. `$XDG_CONFIG_HOME/zextract/config.toml` (an absolute
+/// 2. `$XDG_CONFIG_HOME/cf-zextract/config.toml` (an absolute
 ///    `XDG_CONFIG_HOME` only, per the XDG spec), else
-///    `~/.config/zextract/config.toml`.
+///    `~/.config/cf-zextract/config.toml`.
 /// 3. `$HERDR_PLUGIN_CONFIG_DIR/config.toml` (legacy, herdr only).
 ///
 /// The first file that exists wins. A starter config is written to (1)
@@ -798,11 +798,11 @@ pub fn locate(env: &ConfigEnv, exists: impl Fn(&Path) -> bool) -> ConfigLocation
         .xdg_config_home
         .as_ref()
         .filter(|p| p.is_absolute())
-        .map(|p| p.join("zextract/config.toml"))
+        .map(|p| p.join("cf-zextract/config.toml"))
         .or_else(|| {
             env.home
                 .as_ref()
-                .map(|h| h.join(".config/zextract/config.toml"))
+                .map(|h| h.join(".config/cf-zextract/config.toml"))
         });
     let legacy = env.herdr_plugin_dir.as_ref().map(|d| d.join("config.toml"));
     let path = [neutral.as_ref(), legacy.as_ref()]
@@ -879,15 +879,18 @@ mod tests {
         let e = env(None, None, Some("/h"), Some("/herdr/cfg"));
         let loc = locate(
             &e,
-            existing(&["/h/.config/zextract/config.toml", "/herdr/cfg/config.toml"]),
+            existing(&[
+                "/h/.config/cf-zextract/config.toml",
+                "/herdr/cfg/config.toml",
+            ]),
         );
         assert_eq!(
             loc.path,
-            Some(PathBuf::from("/h/.config/zextract/config.toml"))
+            Some(PathBuf::from("/h/.config/cf-zextract/config.toml"))
         );
         assert_eq!(
             loc.write_target,
-            Some(PathBuf::from("/h/.config/zextract/config.toml"))
+            Some(PathBuf::from("/h/.config/cf-zextract/config.toml"))
         );
     }
 
@@ -899,7 +902,7 @@ mod tests {
         // A starter config would still go to the neutral location.
         assert_eq!(
             loc.write_target,
-            Some(PathBuf::from("/h/.config/zextract/config.toml"))
+            Some(PathBuf::from("/h/.config/cf-zextract/config.toml"))
         );
     }
 
@@ -910,13 +913,13 @@ mod tests {
         assert_eq!(loc.path, None);
         assert_eq!(
             loc.write_target,
-            Some(PathBuf::from("/x/zextract/config.toml"))
+            Some(PathBuf::from("/x/cf-zextract/config.toml"))
         );
         // A relative XDG_CONFIG_HOME is invalid per the spec: use HOME.
         let e = env(None, Some("rel"), Some("/h"), None);
         assert_eq!(
             locate(&e, existing(&[])).write_target,
-            Some(PathBuf::from("/h/.config/zextract/config.toml"))
+            Some(PathBuf::from("/h/.config/cf-zextract/config.toml"))
         );
     }
 
@@ -925,7 +928,10 @@ mod tests {
         let e = env(Some("/my/zx.toml"), None, Some("/h"), Some("/herdr/cfg"));
         let loc = locate(
             &e,
-            existing(&["/h/.config/zextract/config.toml", "/herdr/cfg/config.toml"]),
+            existing(&[
+                "/h/.config/cf-zextract/config.toml",
+                "/herdr/cfg/config.toml",
+            ]),
         );
         assert_eq!(loc.path, None);
         assert_eq!(loc.write_target, Some(PathBuf::from("/my/zx.toml")));

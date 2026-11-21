@@ -1,7 +1,7 @@
 # herdr-zextract config
 #
-# Copy this file to ~/.config/zextract/config.toml
-# ($XDG_CONFIG_HOME/zextract/config.toml if you set XDG_CONFIG_HOME,
+# Copy this file to ~/.config/cf-zextract/config.toml
+# ($XDG_CONFIG_HOME/cf-zextract/config.toml if you set XDG_CONFIG_HOME,
 # or any path you point $ZEXTRACT_CONFIG at) - or run the plugin once
 # with no config and press Ctrl-W in the picker to have it write this
 # same file for you. The old herdr location

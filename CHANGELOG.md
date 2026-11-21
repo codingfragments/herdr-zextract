@@ -5,6 +5,22 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-11-21
+
+### Changed
+
+- **Config dir renamed: `~/.config/zextract/` → `~/.config/cf-zextract/`.**
+  The config file now lives at `~/.config/cf-zextract/config.toml`
+  (or `$XDG_CONFIG_HOME/cf-zextract/config.toml`). Move your existing
+  config once:
+
+  ```sh
+  mv ~/.config/zextract ~/.config/cf-zextract
+  ```
+
+  The legacy `$HERDR_PLUGIN_CONFIG_DIR/config.toml` fallback and the
+  `$ZEXTRACT_CONFIG` full-path override are unchanged.
+
 ## [0.7.2] - 2026-11-19
 
 ### Changed
